@@ -742,7 +742,7 @@ var MODEL_CONFIG = {
   minion:       { targetHeight: 1.4  },
   island:         { targetHeight: -1   },   // -1 = terrain.js handles scale
   shiba_inu:      { targetHeight: 3.5  },  // 2.5× game scale so dog is clearly visible
-  animated_woman: { targetHeight: 8.6  },  // 5× scale
+  animated_woman: { targetHeight: 5.16 },  // 3× scale
 };
 
 var MAX_PLAYERS = 5;
@@ -767,7 +767,7 @@ var PLAYER_SKINS = [
   { id: "santa",    name: "Santa Claus",  icon: "🎅", modelKey: "skin_robot",   color: 0xcc0000,  unlock: "Play 3 holes",    free: false, backdoorCode: "HOHOHO"      },
   { id: "crypto",   name: "Crypto Bro",   icon: "💎", modelKey: "skin_crypto",  color: 0xffdd00,  unlock: "Play 9 holes",    free: false, backdoorCode: "MOONLAMBO"   },
   { id: "chicken",  name: "Chicken Guy",  icon: "🐔", modelKey: "skin_furry",   color: 0xff8800,  unlock: "Get a birdie",    free: false, backdoorCode: "CLUCKCLUCK"  },
-  { id: "duck",     name: "Rubber Duck",  icon: "🦆", modelKey: "skin_ghost",   color: 0xffee00,  unlock: "Play 18 holes",   free: false, backdoorCode: "QUACKQUACK"  },
+  { id: "duck",     name: "Rubber Duck",  icon: "🦆", modelKey: "skin_ghost",   color: 0xffee00,  unlock: "Play 18 holes",   free: false, backdoorCode: "QUACKQUACK", staticSkin: true },
   { id: "chef",     name: "Food Worker",  icon: "👨‍🍳", modelKey: "skin_ninja",   color: 0xffffff,  unlock: "Get an ace",      free: false, backdoorCode: "ORDERUP"     },
 ];
 // Master backdoor: unlocks ALL skins at once

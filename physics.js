@@ -54,12 +54,16 @@ function buildPlayerAvatar(playerIdx, color) {
   // Try GLB override
   var overrideKey = "player_default";  // always start with animated base model
   var fallbackKey = null;
+  var _staticSkinOk = false;  // set true for skins that intentionally have no animations
   // Local player: use their equipped skin if set
   if (typeof myIdx !== "undefined" && playerIdx === myIdx &&
       typeof equippedPlayerSkin !== "undefined" && equippedPlayerSkin !== "default") {
     var _sk = (typeof PLAYER_SKINS !== "undefined")
       ? PLAYER_SKINS.find(function(s){ return s.id === equippedPlayerSkin; }) : null;
-    if (_sk && _sk.modelKey) { overrideKey = _sk.modelKey; fallbackKey = "player_default"; }
+    if (_sk && _sk.modelKey) {
+      overrideKey = _sk.modelKey; fallbackKey = "player_default";
+      if (_sk.staticSkin) _staticSkinOk = true;
+    }
   }
   // Remote player: use their broadcasted skin, fall back to player_default (animated)
   // Never use player_N slot models — those may be static obstacle meshes with no anims
@@ -67,7 +71,10 @@ function buildPlayerAvatar(playerIdx, color) {
     var _rSkinId = (window._remoteSkins && window._remoteSkins[playerIdx]) || "default";
     if (_rSkinId !== "default" && typeof PLAYER_SKINS !== "undefined") {
       var _rsk = PLAYER_SKINS.find(function(s){ return s.id === _rSkinId; });
-      if (_rsk && _rsk.modelKey) { overrideKey = _rsk.modelKey; fallbackKey = "player_default"; }
+      if (_rsk && _rsk.modelKey) {
+        overrideKey = _rsk.modelKey; fallbackKey = "player_default";
+        if (_rsk.staticSkin) _staticSkinOk = true;
+      }
     }
   }
   if (typeof loadModel === "function") {
@@ -77,9 +84,10 @@ function buildPlayerAvatar(playerIdx, color) {
         if (!glb) { if (fallback) tryLoad(fallback, null); return; }
         // If this model has no animation rig/clips, force animated fallback.
         // Without this, remote players appear to "hover" with static poses.
+        // Exception: skins flagged staticSkin:true intentionally have no animations.
         if (!glb.userData || !glb.userData.mixer || !glb.userData.clipActions) {
-          if (fallback && key !== fallback) { tryLoad(fallback, null); return; }
-          return;
+          if (!_staticSkinOk && fallback && key !== fallback) { tryLoad(fallback, null); return; }
+          if (!_staticSkinOk) return;
         }
         while (g.children.length) g.remove(g.children[0]);
         g.add(glb);
