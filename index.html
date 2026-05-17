@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🥏 DiskGolfi — Endless Chaos</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;600&family=Permanent+Marker&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- GLTFLoader + SkeletonUtils: loaded eagerly with fallback chain -->
+  <!-- SkeletonUtils is required for cloning rigged/skinned GLB models correctly -->
+  <script>
+  (function() {
+    var _gltfDone = false, _skelDone = false;
+    function checkBothLoaded() {
+      if (!_gltfDone || !_skelDone) return;
+      // Normalise GLTFLoader onto THREE if needed
+      if (typeof THREE !== 'undefined' && typeof THREE.GLTFLoader === 'undefined') {
+        if (typeof GLTFLoader !== 'undefined') THREE.GLTFLoader = GLTFLoader;
+      }
+      // Normalise SkeletonUtils onto THREE if needed
+      if (typeof THREE !== 'undefined' && typeof THREE.SkeletonUtils === 'undefined') {
+        if (typeof SkeletonUtils !== 'undefined') THREE.SkeletonUtils = SkeletonUtils;
+      }
+      window._gltfReady = true;
+      console.log('DiskGolfi: GLTFLoader ready. THREE.GLTFLoader =',
+        typeof THREE !== 'undefined' ? typeof THREE.GLTFLoader : 'n/a');
+    }
+    function loadScript(urls, i, onDone) {
+      if (i >= urls.length) { console.warn('DiskGolfi: all CDNs failed for', urls[0]); onDone(); return; }
+      var s = document.createElement('script');
+      s.src = urls[i]; s.crossOrigin = 'anonymous';
+      s.onload  = onDone;
+      s.onerror = function() { loadScript(urls, i+1, onDone); };
+      document.head.appendChild(s);
+    }
+    // Load GLTFLoader
+    loadScript([
+      'https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js'
+    ], 0, function() { _gltfDone = true; checkBothLoaded(); });
+    // Load SkeletonUtils (fixes "too much recursion" on rigged/skinned models)
+    loadScript([
+      'https://unpkg.com/three@0.128.0/examples/js/utils/SkeletonUtils.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/utils/SkeletonUtils.js'
+    ], 0, function() { _skelDone = true; checkBothLoaded(); });
+  })();
+  </script>
+  <style>
+/* ═══════════════════════════════════════════════════════
+   DISKGOLFI — 32-BIT ARCADE WARM UI
+   ═══════════════════════════════════════════════════════ */
+*{margin:0;padding:0;box-sizing:border-box;}
+body{overflow:hidden;background:#1a0a00;font-family:"Outfit",sans-serif;user-select:none;touch-action:none;}
+canvas{display:block;}
+
+/* ── 32-BIT PANEL BASE ── */
+.arcade-panel,
+.hud-box {
+  background:rgba(22,7,0,0.93);
+  border:3px solid #ff8c00;
+  border-radius:0;
+  padding:10px 14px;
+  color:#ffd580;
+  box-shadow:4px 4px 0 rgba(90,30,0,.9),inset 0 0 0 1px rgba(255,100,0,.12);
+}
+
+/* ── MENU ── */
+#menu {
+  position:fixed;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:flex-start;
+  overflow-y:auto;overflow-x:hidden;z-index:100;
+  background:linear-gradient(160deg,#1a0500,#2d1200,#1a0000,#0a0500);
+}
+#menu::before {
+  content:"";position:fixed;bottom:0;left:0;right:0;height:45%;
+  background:
+    repeating-linear-gradient(90deg,transparent,transparent 59px,rgba(255,100,0,.10) 59px,rgba(255,100,0,.10) 60px),
+    repeating-linear-gradient(0deg,transparent,transparent 44px,rgba(255,80,0,.06) 44px,rgba(255,80,0,.06) 45px);
+  transform:perspective(280px) rotateX(38deg);transform-origin:bottom center;
+  z-index:0;pointer-events:none;
+}
+#menu::after {
+  content:"";position:fixed;
+  width:160px;height:80px;
+  background:linear-gradient(180deg,#ff6600 0%,#ff6600 18%,#1a0500 18%,#1a0500 24%,#ff8800 24%,#ff8800 40%,#1a0500 40%,#1a0500 44%,#ffaa00 44%,#ffaa00 60%,#1a0500 60%,#1a0500 63%,#ff4400 63%,#ff4400 100%);
+  border-radius:160px 160px 0 0;bottom:44%;left:50%;transform:translateX(-50%);
+  z-index:0;pointer-events:none;
+  box-shadow:0 0 50px rgba(255,100,0,.55),0 0 100px rgba(255,60,0,.2);
+}
+.floating-bg{position:fixed;inset:0;pointer-events:none;z-index:1;}
+.f-emoji{position:absolute;user-select:none;filter:drop-shadow(0 0 6px rgba(255,120,0,.9));animation:vpFloat var(--dur,14s) var(--delay,0s) infinite linear;}
+@keyframes vpFloat{0%{transform:translateY(100vh) translateX(0) scale(.6);opacity:0}8%{opacity:1}50%{transform:translateY(40vh) translateX(var(--xoff,30px)) scale(1);opacity:1}92%{opacity:1}100%{transform:translateY(-15vh) translateX(0) scale(1.4);opacity:0}}
+
+/* ── MENU CONTENT CARD ── */
+.menu-content {
+  position:relative;z-index:10;text-align:center;
+  background:rgba(24,6,0,.94);
+  border:3px solid #ff6600;
+  box-shadow:6px 6px 0 #7a2800,inset 0 0 0 1px rgba(255,60,0,.1);
+  padding:18px 24px 14px;
+  max-width:420px;width:96vw;
+  margin:12px auto 6px;flex-shrink:0;
+}
+#menu h1 {
+  font-family:"Bebas Neue",cursive;font-size:52px;line-height:1;
+  color:#ff8c00;
+  text-shadow:3px 3px 0 #7a2800,-1px -1px 0 #ff4400,0 0 20px rgba(255,140,0,.7);
+  letter-spacing:4px;margin-bottom:12px;
+  animation:titleGlow 2.5s ease-in-out infinite alternate;
+}
+@keyframes titleGlow{0%{text-shadow:3px 3px 0 #7a2800,0 0 12px rgba(255,100,0,.5)}100%{text-shadow:3px 3px 0 #aa4400,0 0 32px rgba(255,180,0,.9),0 0 55px rgba(255,80,0,.35)}}
+
+/* ── ARCADE BUTTONS ── */
+.mbtn {
+  background:#cc4400;color:#ffd580;border:3px solid #ff8c00;
+  padding:9px 28px;font-family:"Bebas Neue",cursive;font-size:18px;letter-spacing:3px;
+  border-radius:0;cursor:pointer;margin:3px;transition:all .07s;
+  box-shadow:4px 4px 0 #7a2800;text-shadow:1px 1px 0 #7a2800;pointer-events:all;
+}
+.mbtn:hover{background:#ff6600;color:#fff;box-shadow:2px 2px 0 #7a2800;transform:translate(2px,2px);}
+.mbtn:active{transform:translate(4px,4px);box-shadow:0 0 0 #7a2800;}
+.mbtn.sec{background:#1e0a00;border-color:#cc5500;color:#ff9933;box-shadow:3px 3px 0 #5a2000;}
+.mbtn.sec:hover{background:#3d1400;color:#ffd580;border-color:#ff8800;box-shadow:1px 1px 0 #5a2000;transform:translate(2px,2px);}
+select{background:#1e0a00!important;color:#ff9933!important;border:2px solid #cc5500!important;border-radius:0!important;font-family:"Bebas Neue",cursive!important;font-size:14px!important;letter-spacing:1px!important;cursor:pointer!important;padding:4px 8px!important;box-shadow:2px 2px 0 #5a2000!important;}
+input[type=text],#mp-input,#username-input{background:#1e0a00;border:3px solid #cc5500;color:#ffcc00;padding:5px 12px;font-family:"Bebas Neue",cursive;font-size:18px;border-radius:0;text-align:center;letter-spacing:2px;outline:none;pointer-events:all;box-shadow:2px 2px 0 #5a2000;}
+#mp-code{font-family:"Bebas Neue",cursive;font-size:44px;color:#ffcc00;letter-spacing:6px;text-shadow:3px 3px 0 #7a5000;cursor:pointer}
+#mp-status{color:#ff8800;font-size:11px;margin-top:4px;text-transform:uppercase;letter-spacing:2px;text-shadow:1px 1px 0 #3a2000;}
+
+/* ── GAME HUD ── */
+#ui{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;display:none;}
+.lbl{font-size:9px;opacity:.65;text-transform:uppercase;letter-spacing:2px;color:#cc8833;font-family:"Bebas Neue",cursive;}
+#scorecard{position:absolute;top:14px;left:14px;min-width:110px;}
+#hole-n{font-family:"Bebas Neue",cursive;font-size:44px;line-height:1;color:#ffcc00;text-shadow:2px 2px 0 #7a5000;}
+#hole-theme-txt{font-size:10px;font-family:"Bebas Neue",cursive;color:#ff8800;margin-top:2px;text-transform:uppercase;letter-spacing:1.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;}
+#hole-par-txt{font-size:11px;color:#cc9944;}
+hr.div{border:none;border-top:2px solid #7a3a00;margin:6px 0;}
+#throw-n{font-family:"Bebas Neue",cursive;font-size:26px;color:#ff8c00;text-shadow:2px 2px 0 #7a2800;}
+#total-txt{font-size:11px;margin-top:4px;}
+#total-txt span{font-family:"Bebas Neue",cursive;font-size:15px;color:#ffcc00;}
+#mp-scores{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:none;gap:14px;align-items:center;white-space:nowrap;padding:7px 16px;}
+.mp-p .pname{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:1px;text-align:center;font-family:"Bebas Neue",cursive;}
+.mp-p .pscore{font-family:"Bebas Neue",cursive;font-size:22px;text-align:center;color:#ffcc00;text-shadow:2px 2px 0 #7a5000;}
+.mp-p .pthrows{font-size:9px;opacity:.5;text-align:center;margin-top:1px;}
+.mp-p.me .pname{color:#ff8800;}.mp-p.me .pscore{color:#ff8800;text-shadow:2px 2px 0 #7a2800,0 0 10px rgba(255,140,0,.5);}
+.mp-sep{font-family:"Bebas Neue",cursive;font-size:12px;opacity:.3;align-self:center;color:#cc6600;}
+#wind{position:absolute;top:14px;right:14px;text-align:center;min-width:68px;}
+#w-arrow{font-size:24px;display:block;margin:3px 0;color:#ff8c00;}
+#w-spd{font-family:"Bebas Neue",cursive;font-size:22px;color:#ffcc00;text-shadow:2px 2px 0 #7a5000;}
+#bhud{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap;}
+#instr{padding:7px 18px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#ffd580;}
+#pwr-bar{margin-top:7px;display:none;align-items:center;justify-content:center;gap:8px;}
+#pwr-track{width:150px;height:10px;background:#1e0a00;border:2px solid #7a3a00;border-radius:0;overflow:hidden;}
+#pwr-fill{height:100%;width:0%;background:linear-gradient(90deg,#cc4400,#ff8800,#ffcc00);box-shadow:0 0 6px rgba(255,140,0,.6);}
+#pwr-pct{font-family:"Bebas Neue",cursive;font-size:17px;color:#ffcc00;min-width:38px;text-align:left;text-shadow:1px 1px 0 #7a5000;}
+#loft-btn{position:absolute;bottom:14px;left:14px;pointer-events:all;cursor:pointer;text-align:center;min-width:60px;transition:all .1s;}
+#loft-btn:hover{transform:translate(2px,2px);}
+#loft-icon{font-size:18px;display:block;}
+#loft-deg{font-family:"Bebas Neue",cursive;font-size:15px;color:#ffcc00;}
+#disc-pick{position:absolute;bottom:14px;right:14px;max-height:80vh;overflow-y:auto;display:flex;flex-direction:column;gap:3px;max-width:162px;}
+.dlbl{text-align:right;margin-bottom:2px;}
+.dopt{background:#1e0a00;border:2px solid #8b4000;border-radius:0;padding:6px 10px;margin-top:3px;cursor:pointer;pointer-events:all;color:#ffd580;transition:all .07s;box-shadow:2px 2px 0 #5a2000;}
+.dopt:hover{background:#3d1400;border-color:#ff8c00;transform:translate(-2px,-2px);box-shadow:4px 4px 0 #5a2000;}
+.dopt.on{background:#5a2000;border-color:#ffcc00;box-shadow:2px 2px 0 #7a5000;}
+.dname{font-family:"Bebas Neue",cursive;font-size:13px;color:#ffd580;letter-spacing:1px;}.dopt.on .dname{color:#ffcc00;}
+.dtip{font-size:8px;opacity:.45;color:#cc8833;margin-top:1px;letter-spacing:.5px;}.dopt.on .dtip{opacity:.7;color:#ff8800;}
+#disc-toggle-btn{position:absolute;bottom:105px;right:14px;display:none;pointer-events:all;background:#cc4400;border:3px solid #ff8800;border-radius:0;width:46px;height:46px;font-size:18px;cursor:pointer;z-index:20;align-items:center;justify-content:center;color:#fff;box-shadow:3px 3px 0 #7a2800;}
+@media(max-width:500px){#disc-toggle-btn{display:flex;}#disc-pick{bottom:154px;}#disc-pick.mobile-open{display:flex!important;}}
+#force-next-btn{position:absolute;bottom:14px;left:50%;transform:translateX(-50%) translateY(60px);pointer-events:all;cursor:pointer;background:#4a0000;border:3px solid #ff3333;border-radius:0;padding:8px 18px;color:#ff9999;font-family:"Bebas Neue",cursive;font-size:15px;letter-spacing:2px;display:none;transition:all .07s;white-space:nowrap;box-shadow:3px 3px 0 #7a0000;}
+#force-next-btn:hover{background:#7a0000;color:#fff;transform:translateX(-50%) translateY(60px) translate(2px,2px);}
+#spectate-banner{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:#1e0a00;border:3px solid #cc8800;border-radius:0;color:#ffcc00;padding:4px 14px;font-size:12px;letter-spacing:2px;pointer-events:none;display:none;white-space:nowrap;font-family:"Bebas Neue",cursive;box-shadow:3px 3px 0 #7a5000;z-index:30;}
+#dist{position:absolute;bottom:76px;left:50%;transform:translateX(-50%);background:#1e0a00;border:3px solid #ff8800;border-radius:0;padding:5px 16px;color:#ffcc00;font-family:"Bebas Neue",cursive;font-size:17px;opacity:0;transition:opacity .5s;box-shadow:3px 3px 0 #7a2800;letter-spacing:1px;}
+#msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#fff;opacity:0;transition:opacity .35s;pointer-events:none;z-index:20;}
+#msg.on{opacity:1;pointer-events:all;}
+#msg-big{font-family:"Bebas Neue",cursive;font-size:80px;line-height:1;color:#ff8c00;text-shadow:5px 5px 0 #7a2800,-2px -2px 0 #ff4400,0 0 26px rgba(255,140,0,.55);letter-spacing:4px;}
+#msg-sub{font-size:17px;margin-top:8px;background:#1e0a00;border:3px solid #cc6600;padding:7px 14px;display:inline-block;box-shadow:4px 4px 0 #7a2800;color:#ffd580;}
+#msg-btn{pointer-events:all;background:#cc4400;color:#ffd580;border:3px solid #ff8800;border-radius:0;padding:9px 28px;font-family:"Bebas Neue",cursive;font-size:18px;letter-spacing:2px;cursor:pointer;margin-top:14px;display:none;min-width:145px;box-shadow:4px 4px 0 #7a2800;transition:all .07s;}
+#msg-btn:empty{display:none!important;}#msg-btn:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #7a2800;background:#ff6600;}
+#weather-hud{position:absolute;top:14px;right:96px;text-align:center;min-width:65px;display:none;}
+#weather-icon{font-size:18px;display:block;}
+#weather-txt{font-size:9px;opacity:.55;letter-spacing:1px;text-transform:uppercase;margin-top:1px;color:#cc8833;}
+#step-back-btn{position:absolute;bottom:14px;left:86px;pointer-events:all;cursor:pointer;background:#001a40;border:3px solid #4488cc;border-radius:0;padding:7px 12px;color:#88bbff;font-family:"Bebas Neue",cursive;font-size:13px;letter-spacing:2px;display:none;transition:all .07s;box-shadow:3px 3px 0 #002255;}
+#step-back-btn:hover{background:#002860;color:#fff;transform:translate(2px,2px);}
+#powerup-banner{position:absolute;top:68px;left:50%;transform:translateX(-50%);background:#1e0a00;border:3px solid #ffcc00;border-radius:0;padding:5px 20px;color:#ffcc00;font-family:"Bebas Neue",cursive;font-size:19px;letter-spacing:2.5px;opacity:0;transition:opacity .4s;white-space:nowrap;box-shadow:4px 4px 0 #7a5000;text-shadow:2px 2px 0 #7a5000;z-index:50;pointer-events:none;}
+#giveup-btn{position:absolute;bottom:68px;right:14px;pointer-events:all;cursor:pointer;background:#2a0000;border:3px solid #cc3333;border-radius:0;padding:7px 11px;color:#ff8888;font-family:"Bebas Neue",cursive;font-size:12px;letter-spacing:1.5px;display:none;transition:all .07s;white-space:nowrap;box-shadow:3px 3px 0 #7a0000;}
+#giveup-btn:hover{background:#4a0000;color:#fff;transform:translate(2px,2px);}
+#giveup-vote{position:absolute;top:115px;left:50%;transform:translateX(-50%);background:#1e0a00;border:3px solid #cc8800;border-radius:0;padding:12px 20px;color:#ffd580;text-align:center;display:none;pointer-events:all;box-shadow:5px 5px 0 #7a5000;}
+#giveup-vote .gv-title{font-family:"Bebas Neue",cursive;font-size:18px;color:#ffcc00;margin-bottom:6px;}
+.gv-btn{background:#2a1400;border:3px solid #cc6600;border-radius:0;color:#ffd580;padding:5px 14px;font-family:"Bebas Neue",cursive;font-size:13px;letter-spacing:1.5px;cursor:pointer;margin:3px;pointer-events:all;transition:all .07s;box-shadow:2px 2px 0 #7a3000;}
+.gv-btn:hover{background:#4a2000;color:#fff;transform:translate(2px,2px);box-shadow:0 0 0 #7a3000;}
+canvas{position:fixed!important;top:0;left:0;width:100%!important;height:100%!important;z-index:1;}
+#menu{z-index:100;}#ui{z-index:10;}
+#fp-crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:15;display:none;}
+#fp-crosshair .ch{width:20px;height:2px;background:rgba(255,200,100,.85);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 4px rgba(0,0,0,.9);}
+#fp-crosshair .cv{width:2px;height:20px;background:rgba(255,200,100,.85);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 4px rgba(0,0,0,.9);}
+body.fp-active #fp-crosshair{display:block;}
+#cam-mode-btn{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:#1e0a00;border:3px solid #cc6600;color:#ff9933;border-radius:0;padding:4px 12px;font-size:11px;font-family:"Bebas Neue",cursive;letter-spacing:2px;cursor:pointer;pointer-events:all;z-index:20;box-shadow:2px 2px 0 #5a2800;}
+#fp-joystick-zone{position:fixed;bottom:96px;left:20px;width:110px;height:110px;z-index:50;pointer-events:all;display:none;}
+#fp-joystick-base{width:108px;height:108px;border-radius:0;background:rgba(60,20,0,.18);border:3px solid rgba(255,140,0,.3);position:relative;}
+#fp-joystick-nub{width:40px;height:40px;border-radius:0;background:rgba(255,120,0,.45);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);}
+#fp-throw-btn{position:fixed;bottom:106px;right:20px;width:74px;height:74px;border-radius:0;background:#cc4400;border:3px solid #ff8800;color:#ffd580;font-size:18px;display:none;align-items:center;justify-content:center;flex-direction:column;pointer-events:all;z-index:50;box-shadow:4px 4px 0 #7a2800;}
+#fp-throw-btn:active{background:#ff6600;transform:translate(2px,2px);box-shadow:2px 2px 0 #7a2800;}
+#fp-punch-btn{position:fixed;bottom:194px;right:20px;width:58px;height:58px;border-radius:0;background:#cc0000;border:3px solid #ff4444;color:#fff;font-size:19px;display:none;align-items:center;justify-content:center;pointer-events:all;z-index:50;box-shadow:4px 4px 0 #7a0000;}
+#fp-punch-btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 #7a0000;}
+@media(pointer:coarse){body.fp-active #fp-joystick-zone{display:block;}body.fp-active #fp-throw-btn{display:flex;}#fp-punch-btn{display:flex!important;}#step-back-btn{display:block!important;}}
+#elev-hud{position:absolute;top:14px;right:178px;text-align:center;min-width:50px;display:none;}
+#elev-val{font-family:"Bebas Neue",cursive;font-size:19px;color:#ffcc00;text-shadow:1px 1px 0 #7a5000;}
+@media(max-width:620px){
+  .menu-content{padding:12px 10px;margin:6px auto 4px;}
+  #menu h1{font-size:38px;}
+  .mbtn{font-size:15px;padding:8px 16px;}
+  #disc-pick{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;max-width:100vw;max-height:none;bottom:84px;right:0;left:0;padding:3px 8px;gap:5px;background:rgba(22,7,0,.9);border-top:3px solid #8b4000;border-radius:0;scrollbar-width:none;}
+  #disc-pick::-webkit-scrollbar{display:none;}
+  .dlbl{display:none;}.dopt{min-width:70px;max-width:70px;flex-shrink:0;padding:5px 6px;text-align:center;}.dtip,.dpow{display:none;}.dname{font-size:11px;}
+  #bhud{bottom:145px;}
+  #scorecard{padding:4px 7px;min-width:52px;}#hole-n{font-size:26px;}#throw-n{font-size:18px;}
+}
+@media(pointer:coarse){.mbtn{min-height:44px;}.dopt{min-height:38px;}#loft-btn{min-height:44px;min-width:44px;}.gv-btn{min-height:42px;}}
+.bonk-popup{font-family:"Bebas Neue",cursive!important;font-size:38px;font-weight:900;letter-spacing:4px;color:#ffcc00;text-shadow:3px 3px 0 #7a2800,-2px -2px 0 #cc4400,0 0 14px rgba(255,140,0,.8);pointer-events:none;z-index:9999;will-change:transform,opacity;white-space:nowrap;}
+@keyframes punchHitFlash{0%{opacity:1}100%{opacity:0}}
+
+/* ── SKIN LOCKER CARDS ── */
+.skin-card{border-radius:0;background:#1e0a00;border:2px solid #8b4000;padding:8px 6px;text-align:center;cursor:pointer;box-shadow:2px 2px 0 #5a2000;transition:all .07s;}
+.skin-card:hover{background:#3d1400;border-color:#ff8800;transform:translate(2px,2px);box-shadow:0 0;}
+.skin-card.active{background:#5a2000;border-color:#ffcc00;box-shadow:3px 3px 0 #7a5000;}
+.skin-card.locked{opacity:.38;cursor:default;}
+.skin-icon{font-size:22px;display:block;margin-bottom:3px;}
+.skin-name{font-family:"Bebas Neue",cursive;font-size:12px;color:#ffd580;letter-spacing:1px;}
+.skin-unlock{font-size:8px;color:#cc8833;margin-top:2px;opacity:.7;}
+
+/* ── DISC LOCKER (arcade styled) ── */
+#disc-locker > div{background:#1a0500!important;border:3px solid #ff8800!important;border-radius:0!important;box-shadow:6px 6px 0 #7a2800!important;}
+</style>
+</head>
+<body>
+
+  <!-- ── MENU ── -->
+  <div id="menu">
+    <div class="floating-bg" id="float-bg"></div>
+    <div class="menu-content">
+      <h1>🥏 DISKGOLFI</h1>
+
+      <!-- NAME -->
+      <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px">
+        <span class="lbl">Name:</span>
+        <input id="username-input" value="Player 1" maxlength="16" style="width:145px;font-size:17px"
+          oninput="if(typeof playerNames!=='undefined')playerNames[0]=this.value||'Player 1'">
+      </div>
+
+      <!-- MAIN ACTIONS -->
+      <div id="sp-main-btns" style="display:flex;flex-direction:column;align-items:center;gap:5px;margin-bottom:10px">
+        <button class="mbtn" style="width:210px" onclick="toggleSpMapPicker()">▶ SINGLE PLAYER</button>
+        <div style="display:flex;gap:5px">
+          <button class="mbtn sec" style="font-size:14px;padding:7px 14px" onclick="openDiscLocker()">🎨 DISC LOCKER</button>
+          <button class="mbtn sec" style="font-size:14px;padding:7px 14px" onclick="openSkinLocker()">👤 SKINS</button>
+        </div>
+        <button class="mbtn sec" style="width:210px" onclick="_showMpPanel()">🌐 MULTIPLAYER</button>
+      </div>
+
+      <!-- SP MAP PICKER -->
+      <div id="sp-map-picker" style="display:none;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+          <button class="mbtn sec" style="padding:4px 10px;font-size:12px;margin:0" onclick="toggleSpMapPicker()">← BACK</button>
+          <span style="color:#ffcc00;font-size:13px;font-family:'Bebas Neue',cursive;letter-spacing:1px;flex:1;text-align:center">CHOOSE MAP</span>
+          <button class="mbtn" style="padding:4px 10px;font-size:12px;margin:0" onclick="startSPWithTheme(null)">🎲 RANDOM</button>
+        </div>
+        <div id="sp-map-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:220px;overflow-y:auto;padding:2px"></div>
+      </div>
+
+      <!-- MP PANEL -->
+      <div id="mp-panel" style="display:none">
+        <div style="display:flex;gap:0;margin-bottom:8px">
+          <button id="mp-tab-host" class="mbtn"     style="flex:1;font-size:15px;padding:7px 0;margin:0;border-right:0" onclick="_mpTab('host')">HOST</button>
+          <button id="mp-tab-join" class="mbtn sec" style="flex:1;font-size:15px;padding:7px 0;margin:0"              onclick="_mpTab('join')">JOIN</button>
+        </div>
+
+        <!-- HOST AREA -->
+        <div id="host-area" style="display:block">
+          <div style="display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:2px">
+            <div id="mp-code" onclick="copyCode()">------</div>
+            <button class="mbtn sec" style="padding:5px 9px;font-size:12px;margin:0" onclick="copyCode()">📋</button>
+          </div>
+          <div id="copy-flash" style="color:#ffcc00;font-size:10px;letter-spacing:1px;opacity:0;transition:opacity .3s;text-align:center">✓ Copied!</div>
+          <div id="mp-status" style="text-align:center;margin-top:3px">Connecting…</div>
+          <div id="lobby-list" style="margin-top:6px;min-height:18px;font-size:11px;color:#ffd580;text-align:center;font-family:'Bebas Neue',cursive;letter-spacing:1px"></div>
+
+          <!-- SETTINGS -->
+          <div style="margin:7px 0;border:2px solid #7a3a00;padding:7px;background:#1a0500">
+            <div class="lbl" style="margin-bottom:5px;color:#ff8800;font-size:10px">⚙ GAME SETTINGS</div>
+            <div style="display:flex;gap:8px;justify-content:center;margin-bottom:7px">
+              <div style="text-align:center">
+                <div class="lbl" style="margin-bottom:2px">Holes</div>
+                <select id="hole-count-sel" onchange="setHoleCount(this.value)">
+                  <option value="9">9</option><option value="18" selected>18</option>
+                  <option value="27">27</option><option value="36">36</option>
+                </select>
+              </div>
+              <div style="text-align:center">
+                <div class="lbl" style="margin-bottom:2px">Difficulty</div>
+                <select id="difficulty-sel" onchange="setDifficulty(this.value)">
+                  <option value="easy">Easy</option><option value="normal" selected>Normal</option>
+                  <option value="hard">Hard</option><option value="chaos">Chaos</option>
+                </select>
+              </div>
+            </div>
+            <div class="lbl" style="margin-bottom:3px">Map Pool</div>
+            <div style="display:flex;gap:2px;flex-wrap:wrap;justify-content:center;margin-bottom:3px">
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('all')">All</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('spooky')">👻</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('funny')">😂</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('nature')">🌿</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('urban')">🏙️</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="setMapPool('new')">✨</button>
+              <button class="mbtn sec" style="padding:2px 7px;font-size:10px;margin:1px" onclick="_toggleMapPicker()">🗂️</button>
+            </div>
+            <div id="pool-label" class="lbl" style="text-align:center;margin-bottom:3px;opacity:.5">Pool: All Maps</div>
+            <div id="pool-pick-panel" style="display:none;max-height:90px;overflow-y:auto;border:1px solid #7a3a00;padding:3px;background:#140600">
+              <div id="map-checkboxes" style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:9px"></div>
+              <button class="mbtn sec" onclick="applyMapPicks()" style="margin-top:3px;width:100%;padding:3px 0;font-size:11px">✓ Apply</button>
+            </div>
+          </div>
+
+          <button id="start-game-btn" class="mbtn" style="display:none;width:100%;padding:10px 0;font-size:18px;margin-top:3px" onclick="hostStartGame()">▶ START GAME</button>
+        </div>
+
+        <!-- JOIN AREA -->
+        <div id="join-area" style="display:none">
+          <input id="mp-input" placeholder="ENTER CODE" maxlength="10" style="width:100%;margin-bottom:8px;display:block"><br>
+          <button class="mbtn" style="width:100%;padding:10px 0;font-size:17px" onclick="joinGame()">Connect →</button>
+          <div id="join-status" style="color:#ff8800;font-size:11px;margin-top:7px;text-align:center;font-family:'Bebas Neue',cursive;letter-spacing:1px"></div>
+        </div>
+
+        <div style="display:flex;gap:4px;justify-content:center;margin-top:7px">
+          <button class="mbtn sec" style="padding:4px 12px;font-size:11px" onclick="leaveLobby()">✕ LEAVE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GAME UI ── -->
+  <div id="fp-crosshair"><div class="ch"></div><div class="cv"></div></div>
+  <button id="cam-mode-btn" onclick="toggleCameraMode()">👁 FP</button>
+  <div id="fp-joystick-zone"><div id="fp-joystick-base"><div id="fp-joystick-nub"></div></div></div>
+  <button id="fp-throw-btn" ontouchstart="fpThrowStart(event)" ontouchend="fpThrowEnd(event)">🥏<br><span style="font-size:9px;opacity:.7">THROW</span></button>
+  <button id="fp-punch-btn" ontouchstart="if(typeof _doPunch!=='undefined'&&typeof _punchCooldown!=='undefined'&&_punchCooldown<=0){_punchCooldown=1.2;_doPunch()}">👊</button>
+  <div id="ui">
+    <div id="scorecard" class="hud-box">
+      <div class="lbl">Hole</div><div id="hole-n">1</div>
+      <div id="hole-theme-txt">Eerie</div>
+      <div id="hole-par-txt">Par <span id="par-v">3</span></div>
+      <hr class="div">
+      <div class="lbl">Throws</div><div id="throw-n">0</div>
+      <div id="total-txt" class="lbl" style="margin-top:6px">Total: <span id="tot-v">E</span></div>
+    </div>
+    <div id="mp-scores" class="hud-box" style="display:none;flex-direction:row;gap:12px;align-items:center"></div>
+    <div id="elev-hud" class="hud-box" style="position:absolute;top:14px;right:174px;text-align:center;min-width:50px;display:none">
+      <div class="lbl">Elev</div><div id="elev-val">0m</div>
+    </div>
+    <div id="wind" class="hud-box"><div class="lbl">Wind</div><span id="w-arrow">→</span><div id="w-spd">0.0</div><div class="lbl">m/s</div></div>
+    <div id="bhud">
+      <div id="instr" class="hud-box">Arrows: Rotate &nbsp;·&nbsp; Drag Up = Power &nbsp;·&nbsp; Release</div>
+      <div id="pwr-bar">
+        <span style="font-size:9px;color:rgba(255,255,255,.6);text-transform:uppercase">PWR</span>
+        <div id="pwr-track"><div id="pwr-fill"></div></div>
+        <div id="pwr-pct">0%</div>
+      </div>
+    </div>
+    <div id="loft-btn" class="hud-box" onclick="cycleLoft()"><span id="loft-icon">🟡</span><div class="lbl" style="margin-top:3px">Loft</div><div id="loft-deg">18°</div></div>
+    <button id="disc-toggle-btn" onclick="var p=document.getElementById('disc-pick');p.classList.toggle('mobile-open')">🥏</button>
+    <div id="disc-pick"><div class="dlbl lbl">Disc</div><div id="disc-opts-container"></div></div>
+    <div id="spectate-banner">👀 SPECTATING</div>
+    <div id="force-next-btn" onclick="hostForceNext()">⏭ SKIP HOLE (HOST)</div>
+    <div id="dist">—</div>
+    <div id="msg"><div id="msg-big"></div><div id="msg-sub"></div><button id="msg-btn" onclick="advanceHole()"></button></div>
+    <div id="weather-hud" class="hud-box" style="min-width:88px">
+      <span id="weather-icon" style="font-size:20px;display:block">☀️</span>
+      <div id="weather-txt" style="font-size:9px;opacity:.5;letter-spacing:1px;text-transform:uppercase;margin-top:1px">Clear</div>
+      <div id="weather-effect" style="font-size:8px;color:#ffcc44;margin-top:2px;opacity:.8"></div>
+    </div>
+    <div id="step-back-btn" onclick="stepBack()">↩ STEP BACK</div>
+    <div id="powerup-banner">⚡ POWER UP!</div>
+    <div id="giveup-vote">
+      <div id="gv-title" class="gv-title">⛳ SKIP HOLE?</div>
+      <div id="gv-count" style="font-size:11px;opacity:.75;margin-bottom:8px">0 / 0 voted yes</div>
+      <button class="gv-btn" onclick="voteGiveUp(true)">✓ YES</button>
+      <button class="gv-btn" onclick="voteGiveUp(false)">✗ NO</button>
+    </div>
+    <div id="giveup-btn" onclick="onGiveUpClick()">🏳 GIVE UP</div>
+  </div>
+
+  <!-- ── SCRIPTS — must be in this exact order ── -->
+
+  <!-- Load diagnostic: shows error if JS files fail to load -->
+  <script>
+    window.onerror = function(msg, src, line) {
+      console.error('JS Error in', src, 'line', line, ':', msg);
+    };
+    window._loadedScripts = [];
+  </script>
+  <script src="config.js"></script>
+  <script src="rng.js"></script>
+  <script src="audio.js"></script>
+  <script src="weather.js"></script>
+  <script src="particles.js"></script>
+  <script src="powerups.js"></script>
+  <script src="terrain.js"></script>
+  <script src="obstacles.js"></script>
+  <script src="physics.js"></script>
+  <script src="ui.js"></script>
+  <script src="multiplayer.js"></script>
+  <script src="game.js"></script>
+
+
+  <script>
+    // Verify game loaded correctly — runs after a tick so runtime errors settle
+    window._gameErrors = [];
+    var _origOnerror = window.onerror;
+    window.onerror = function(msg, src, line, col, err) {
+      window._gameErrors.push({ msg: msg, src: (src||'').split('/').pop(), line: line });
+      if (_origOnerror) _origOnerror.apply(this, arguments);
+    };
+    setTimeout(function() {
+      var missing = [];
+      ['startGame','loadHole','generateHole','AudioEngine','buildBasket'].forEach(function(fn) {
+        if (typeof window[fn] === 'undefined') missing.push(fn);
+      });
+      if (missing.length > 0) {
+        var errDetails = window._gameErrors.map(function(e) {
+          return e.src + ':' + e.line + ' — ' + e.msg.substring(0,80);
+        }).join('<br>');
+        document.body.innerHTML = '<div style="position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#ff4444;font-family:monospace;font-size:15px;padding:40px;text-align:center;overflow:auto">' +
+          '<div style="font-size:32px;margin-bottom:16px">&#9888; Load Error</div>' +
+          '<div style="color:#fff;margin-bottom:8px">These game functions are missing:</div>' +
+          '<div style="color:#ff6666;margin-bottom:16px">' + missing.join(', ') + '</div>' +
+          (errDetails ? '<div style="color:#ffaa44;font-size:12px;margin-bottom:12px;max-width:600px"><b>JS Errors caught:</b><br>' + errDetails + '</div>' : '') +
+          '<div style="color:#aaa;font-size:12px;max-width:560px">Make sure ALL .js files are in the SAME folder as index.html<br><br>' +
+          'Required: config.js rng.js audio.js weather.js particles.js powerups.js terrain.js obstacles.js physics.js ui.js multiplayer.js game.js</div>' +
+          '</div>';
+      }
+    }, 100);
+  </script>
+
+  <!-- ── DISC LOCKER MODAL ── -->
+  <div id="disc-locker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;overflow-y:auto;padding:12px">
+    <div style="max-width:500px;margin:0 auto;background:#1a0500;border:3px solid #ff8800;padding:18px;box-shadow:6px 6px 0 #7a2800">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-family:'Bebas Neue',cursive;font-size:22px;color:#ff8800;letter-spacing:3px;text-shadow:2px 2px 0 #7a2800;margin:0">🎨 DISC LOCKER</h2>
+        <button onclick="closeDiscLocker()" style="background:#2a0000;border:3px solid #cc3333;color:#ff8888;border-radius:0;padding:3px 10px;cursor:pointer;font-size:16px;box-shadow:2px 2px 0 #7a0000">✕</button>
+      </div>
+      <div id="dl-disc-tabs" style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <div id="dl-preview-name" style="font-family:'Bebas Neue',cursive;font-size:14px;color:#ff8800;text-align:center;margin-bottom:7px;min-height:18px;letter-spacing:1px"></div>
+      <div id="dl-skin-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-height:300px;overflow-y:auto;min-height:60px;background:rgba(0,0,0,.2);padding:4px"></div>
+      <div style="display:flex;gap:6px;margin-top:10px;justify-content:center">
+        <input id="disc-code-input" placeholder="ENTER CODE" maxlength="20"
+          style="background:#1e0a00;border:2px solid #cc5500;color:#ffcc00;padding:5px 10px;font-family:'Bebas Neue',cursive;font-size:16px;border-radius:0;width:160px;text-align:center;letter-spacing:2px;outline:none;text-transform:uppercase">
+        <button onclick="_tryDiscCode()" style="background:#cc4400;border:2px solid #ff8800;color:#ffd580;padding:5px 12px;font-family:'Bebas Neue',cursive;font-size:14px;letter-spacing:1px;cursor:pointer;border-radius:0">UNLOCK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PLAYER SKIN LOCKER MODAL ── -->
+  <div id="skin-locker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;overflow-y:auto;padding:12px">
+    <div style="max-width:480px;margin:0 auto;background:#1a0500;border:3px solid #ff8800;padding:18px;box-shadow:6px 6px 0 #7a2800">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="font-family:'Bebas Neue',cursive;font-size:22px;color:#ff8800;letter-spacing:3px;text-shadow:2px 2px 0 #7a2800;margin:0">👤 PLAYER SKINS</h2>
+        <button onclick="closeSkinLocker()" style="background:#2a0000;border:3px solid #cc3333;color:#ff8888;border-radius:0;padding:3px 10px;cursor:pointer;font-size:16px;box-shadow:2px 2px 0 #7a0000">✕</button>
+      </div>
+      <div style="font-size:9px;color:#cc8833;letter-spacing:1px;text-align:center;margin-bottom:8px;text-transform:uppercase">Your character model · Link GLB in config.js MODEL_OVERRIDES</div>
+      <div id="skin-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-height:300px;overflow-y:auto"></div>
+      <div id="skin-preview-name" style="font-family:'Bebas Neue',cursive;font-size:13px;color:#ff8800;text-align:center;margin-top:7px;min-height:16px;letter-spacing:1px"></div>
+    </div>
+  </div>
+
+</body>
+</html>
