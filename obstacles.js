@@ -2,55 +2,151 @@
 // All obstacle factory functions. Each returns { mesh, r, h, type }.
 // They rely on THREE (global) and srng() (from rng.js).
 
-function buildBasket() {
+// ── BASKET ───────────────────────────────────────────────────────────────────
+// Shared dimensions (metres, relative to the basket base on the island surface).
+// Physics uses these for chain catches, rim/band spit-outs and pole hits.
+// Scale is ~1.3× a real basket so it reads well next to the oversized disc.
+var BASKET_DIM = {
+  height:    1.82,  // top of the cap
+  bandY:     1.60,  // centre of the top chain-support band
+  bandR:     0.38,
+  bandH:     0.08,
+  chainTopY: 1.57,
+  chainBotY: 1.02,
+  trayTopY:  1.02,
+  trayBotY:  0.70,
+  trayR:     0.42,
+  poleR:     0.032,
+  catchR:    0.50,  // horizontal radius inside which a disc at chain height is caught
+  centerY:   1.30,  // aim point (middle of the chains)
+};
+var currentBasket = null;
+
+function buildBasket(holeNum) {
   const g = new THREE.Group();
-  // If a GLB override exists for "basket", load it asynchronously
-  // and swap into g once loaded. g is returned immediately with procedural mesh.
   if (typeof loadModel === "function" && MODEL_OVERRIDES && MODEL_OVERRIDES.basket) {
     loadModel("basket", function(glbGroup) {
-      if (!glbGroup) return;  // load failed — keep procedural
+      if (!glbGroup) return;
       while (g.children.length) g.remove(g.children[0]);
       g.add(glbGroup);
     });
   }
-  const mPole  = new THREE.MeshPhongMaterial({ color: 0xbbbbbb, shininess: 80 });
-  const mOrg   = new THREE.MeshPhongMaterial({ color: 0xff6600, shininess: 60 });
-  const mYel   = new THREE.MeshPhongMaterial({ color: 0xffdd00, shininess: 60 });
-  const mChain = new THREE.LineBasicMaterial({ color: 0xaaaaaa });
+  const D = BASKET_DIM;
+  const steel  = new THREE.MeshStandardMaterial({ color: 0xc8ccd0, metalness: 0.9, roughness: 0.32 });
+  const darkSt = new THREE.MeshStandardMaterial({ color: 0x5a6068, metalness: 0.85, roughness: 0.45 });
+  const chainM = new THREE.MeshStandardMaterial({ color: 0xd8dce0, metalness: 1.0, roughness: 0.28 });
+  const coat   = new THREE.MeshStandardMaterial({ color: 0xffc21a, metalness: 0.1, roughness: 0.45 });
 
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.044, 3.2, 10), mPole);
-  pole.position.y = 1.6; pole.castShadow = true; g.add(pole);
-  const topcap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.06, 16), mPole);
-  topcap.position.y = 3.22; g.add(topcap);
-  const upRim = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.038, 8, 32), mOrg);
-  upRim.rotation.x = Math.PI / 2; upRim.position.y = 2.92; upRim.castShadow = true; g.add(upRim);
-  const loRim = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.038, 8, 32), mYel);
-  loRim.rotation.x = Math.PI / 2; loRim.position.y = 1.75; loRim.castShadow = true; g.add(loRim);
+  // Base plate + pole
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.04, 24), darkSt);
+  base.position.y = 0.02; base.castShadow = true; base.receiveShadow = true; g.add(base);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(D.poleR, D.poleR, D.height - 0.02, 14), steel);
+  pole.position.y = (D.height - 0.02) / 2; pole.castShadow = true; g.add(pole);
 
-  const chainCount = 24;
-  for (let i = 0; i < chainCount; i++) {
-    const a = (i / chainCount) * Math.PI * 2;
-    const px = Math.cos(a), pz = Math.sin(a);
-    const sag = 0.3 + Math.random() * 0.4;
-    const pts = [];
-    for (let s = 0; s <= 8; s++) {
-      const t2 = s / 8;
-      const cx = px * (0.44 - t2 * (0.44 - 0.36));
-      const cz = pz * (0.44 - t2 * (0.44 - 0.36));
-      const cy = 2.92 - t2 * (2.92 - 1.75) - Math.sin(t2 * Math.PI) * sag;
-      pts.push(new THREE.Vector3(cx, cy, cz));
-    }
-    const chainGeo = new THREE.BufferGeometry().setFromPoints(pts);
-    g.add(new THREE.Line(chainGeo, mChain));
+  // Tray: bottom plate, wire cage, rings and a powder-coated lip
+  const trayBot = new THREE.Mesh(new THREE.CylinderGeometry(D.trayR - 0.07, D.trayR - 0.07, 0.02, 32), darkSt);
+  trayBot.position.y = D.trayBotY; trayBot.castShadow = true; trayBot.receiveShadow = true; g.add(trayBot);
+  const wires = [];
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const p0 = new THREE.Vector3(Math.cos(a) * (D.trayR - 0.07), D.trayBotY, Math.sin(a) * (D.trayR - 0.07));
+    const p1 = new THREE.Vector3(Math.cos(a) * D.trayR, D.trayTopY, Math.sin(a) * D.trayR);
+    const dir = p1.clone().sub(p0), len = dir.length();
+    const w = new THREE.CylinderGeometry(0.006, 0.006, len, 4);
+    w.translate(0, len / 2, 0);
+    w.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize())));
+    w.translate(p0.x, p0.y, p0.z);
+    wires.push(w);
   }
-  const cup = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.4, 0.3, 0.35, 16, 1, true),
-    new THREE.MeshPhongMaterial({ color: 0xffcc44, side: THREE.DoubleSide, transparent: true, opacity: 0.18 })
-  );
-  cup.position.y = 1.58; g.add(cup);
-  const glow = new THREE.PointLight(0xffaa44, 0.7, 4);
-  glow.position.y = 1.8; g.add(glow);
+  // radial floor wires
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI;
+    const w = new THREE.CylinderGeometry(0.005, 0.005, (D.trayR - 0.07) * 2, 4);
+    w.rotateZ(Math.PI / 2); w.rotateY(a); w.translate(0, D.trayBotY + 0.012, 0);
+    wires.push(w);
+  }
+  const wireMesh = new THREE.Mesh(GFX.mergeGeometries(wires), steel);
+  wireMesh.castShadow = true; g.add(wireMesh);
+  [[D.trayR, D.trayTopY, 0.014], [D.trayR - 0.035, (D.trayTopY + D.trayBotY) / 2, 0.009], [D.trayR - 0.07, D.trayBotY, 0.012]].forEach(function(r) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r[0], r[2], 6, 40), steel);
+    ring.rotation.x = Math.PI / 2; ring.position.y = r[1]; ring.castShadow = true; g.add(ring);
+  });
+  const lip = new THREE.Mesh(new THREE.CylinderGeometry(D.trayR + 0.006, D.trayR - 0.004, 0.07, 40, 1, true), coat);
+  lip.position.y = D.trayTopY - 0.035; lip.castShadow = true; g.add(lip);
+
+  // Top band with hole number
+  let bandMat = coat;
+  if (typeof GFX !== "undefined" && GFX._canvas) {
+    const c = GFX._canvas(512); const x = c.getContext("2d");
+    c.height = 64;
+    x.fillStyle = "#ffc21a"; x.fillRect(0, 0, 512, 64);
+    x.fillStyle = "#1a1a1a"; x.font = "900 34px Nunito, 'Segoe UI', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+    const label = "DISKGOLFI  ·  " + (holeNum || "");
+    x.fillText(label, 128, 34); x.fillText(label, 384, 34);
+    const t = GFX._tex(c); t.wrapT = THREE.ClampToEdgeWrapping;
+    bandMat = new THREE.MeshStandardMaterial({ map: t, metalness: 0.1, roughness: 0.45, side: THREE.DoubleSide });
+  }
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(D.bandR, D.bandR, D.bandH, 48, 1, true), bandMat);
+  band.position.y = D.bandY; band.castShadow = true; g.add(band);
+  const bandRim = new THREE.Mesh(new THREE.TorusGeometry(D.bandR, 0.01, 6, 48), steel);
+  bandRim.rotation.x = Math.PI / 2; bandRim.position.y = D.bandY + D.bandH / 2; g.add(bandRim);
+  const spokes = [];
+  for (let i = 0; i < 4; i++) {
+    const s = new THREE.CylinderGeometry(0.008, 0.008, D.bandR * 2, 4);
+    s.rotateZ(Math.PI / 2); s.rotateY(i * Math.PI / 4); s.translate(0, D.bandY + 0.02, 0);
+    spokes.push(s);
+  }
+  g.add(new THREE.Mesh(GFX.mergeGeometries(spokes), steel));
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.05, 20), coat);
+  cap.position.y = D.height - 0.025; cap.castShadow = true; g.add(cap);
+
+  // Chains: 12 outer + 12 inner catenaries from the hangers to the collar
+  const chains = new THREE.Group();
+  chains.position.y = D.chainTopY;
+  const tubes = [];
+  [[D.bandR - 0.05, 0.0], [0.22, Math.PI / 12]].forEach(function(ring, ri) {
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + ring[1];
+      const top = new THREE.Vector3(Math.cos(a) * ring[0], 0, Math.sin(a) * ring[0]);
+      const ba = a + (ri === 0 ? 0.55 : -0.35);   // chains twist toward the collar
+      const bot = new THREE.Vector3(Math.cos(ba) * 0.07, D.chainBotY - D.chainTopY, Math.sin(ba) * 0.07);
+      const mid = top.clone().lerp(bot, 0.5);
+      const out = new THREE.Vector3(mid.x, 0, mid.z).normalize().multiplyScalar(ri === 0 ? 0.07 : 0.035);
+      mid.add(out);
+      const curve = new THREE.QuadraticBezierCurve3(top, mid, bot);
+      tubes.push(new THREE.TubeGeometry(curve, 12, 0.0085, 4, false));
+    }
+  });
+  const chainMesh = new THREE.Mesh(GFX.mergeGeometries(tubes), chainM);
+  chainMesh.castShadow = true;
+  chains.add(chainMesh);
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 16), steel);
+  collar.position.y = D.chainBotY - D.chainTopY; chains.add(collar);
+  g.add(chains);
+
+  g.userData.chains = chains;
+  g.userData.wobble = 0;
+  g.userData.isBasket = true;
   return g;
+}
+
+// Chains swing when hit; call every frame
+function updateBasketFX(dt) {
+  if (!currentBasket || !currentBasket.userData.chains) return;
+  var b = currentBasket.userData;
+  if (b.wobble > 0.001) {
+    b.wobbleT = (b.wobbleT || 0) + dt;
+    var w = b.wobble;
+    b.chains.rotation.x = Math.sin(b.wobbleT * 17) * 0.12 * w;
+    b.chains.rotation.z = Math.cos(b.wobbleT * 13) * 0.10 * w;
+    b.chains.rotation.y = Math.sin(b.wobbleT * 7) * 0.15 * w;
+    b.wobble *= Math.exp(-dt * 2.2);
+  } else { b.chains.rotation.set(0, 0, 0); b.wobble = 0; }
+}
+function shakeBasket(intensity) {
+  if (!currentBasket) return;
+  currentBasket.userData.wobble = Math.min(1.5, (currentBasket.userData.wobble || 0) + (intensity || 1));
+  currentBasket.userData.wobbleT = 0;
 }
 
 function buildTractor() {

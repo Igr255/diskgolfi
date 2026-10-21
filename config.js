@@ -23,6 +23,8 @@ var MODEL_OFFSETS = {
   "skin_furry":     { feetLift: 0.15 },
   "skin_ghost":     { feetLift: 0.15 },
   "skin_ninja":     { feetLift: 0.15 },
+  "skin_citizen3":  { feetLift: 0.15 },
+  "skin_runner":    { feetLift: 0.0 },
 };
 function _playerFeetLift(slotIdx, skinKey) {
   // If a skin key is provided, prefer its offset
@@ -33,13 +35,25 @@ function _playerFeetLift(slotIdx, skinKey) {
          (MODEL_OFFSETS["player_default"] && MODEL_OFFSETS["player_default"].feetLift) || 0;
 }
 
+// ── MULTIPLAYER NETWORKING ───────────────────────────────────────────────
+// Players connect browser-to-browser (WebRTC). STUN lets that work on most
+// home networks, but when one player is on mobile data, a strict router or a
+// school/office network the direct link can't be made and a TURN relay is
+// needed. Paste the credentials of any TURN service here (e.g. a free account
+// at expressturn.com or metered.ca gives you urls + username + credential):
+//
+//   var TURN_SERVERS = [
+//     { urls: "turn:YOUR.TURN.HOST:3478", username: "USER", credential: "PASS" },
+//     { urls: "turn:YOUR.TURN.HOST:443?transport=tcp", username: "USER", credential: "PASS" },
+//   ];
+var TURN_SERVERS = [];
 var PEER_CONFIG = {
   debug: 1,
   config: {
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-    ],
+      { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+      { urls: "stun:stun.cloudflare.com:3478" },
+    ].concat(TURN_SERVERS),
   },
 };
 
@@ -129,8 +143,9 @@ var MODEL_OVERRIDES = {
   // player_default:    'models/player.glb',
   // player_0:          'models/player_host.glb',   // host slot
 
-  // ── PLAYER SKIN MODELS (link to Skin Locker entries) ─────────────────────
-  player_default: 'models/BasePlayer.glb',
+  // ── PLAYER MODELS ─────────────────────────────────────────────────────────
+  // Every slot uses the animated BasePlayer rig; cosmetic variety comes from skins.
+player_default: 'models/BasePlayer.glb',
 player_0:       'models/BasePlayer.glb',
 player_1:       'models/BasePlayer.glb',
 player_2:       'models/BasePlayer.glb',
@@ -143,7 +158,9 @@ player_4:       'models/BasePlayer.glb',
 // like BasePlayer.glb: T-pose at rest, Idle/Walk/Sprint/Jump/Grounded clips.
 // Uncomment and provide your model path to activate a skin.
 //
-skin_default:        'models/players/BasePlayer.glb',
+skin_default:        'models/BasePlayer.glb',
+skin_citizen3:       'models/players/Citizen 3.glb',
+skin_runner:         'models/Animated Woman.glb',
 skin_trainer:        'models/players/Citizen 2.glb',
 skin_robot:          'models/players/Santa Claus.glb',
 skin_crypto:         'models/players/Crypto Bro.glb',
@@ -256,15 +273,10 @@ skin_ninja:          'models/players/Food Worker.glb',
   // sb_crate:          'models/sb_crate.glb',
 
   // ────────────────────────────────────────────────────────────────────
-  // ↓ Active overrides below — remove comment slashes to enable ↓
+  // ↓ Active overrides below ↓
+  // Only models that actually depict the obstacle are mapped. Everything else
+  // uses its themed procedural model (e.g. toilets are toilets, not ponds).
   // ────────────────────────────────────────────────────────────────────
-  // PLAYERS
-player_default: 'models/BasePlayer.glb',
-player_0:       'models/BasePlayer.glb',
-player_1:       'models/Trainer.glb',
-player_2:       'models/Robot.glb',
-player_3:       'models/Crypto Bro.glb',
-player_4:       'models/Furry boi v2.glb',
 
 // NATURE / UNIVERSAL
 tree:           'models/Tree.glb',
@@ -276,94 +288,42 @@ mtnpeak:        'models/Mountain.glb',
 // EERIE / FUNNY
 furry:          'models/Rooster.glb',
 tractor:        'models/Tractor.glb',
-axe:            'models/Arrow Sign.glb',
 entity:         'models/Ghoooooost.glb',
 screamer:       'models/Chick.glb',
 spike:          'models/Spikes.glb',
 arrow:          'models/Arrow Sign.glb',
 
 // GEOMETRY DASH
-geospike:       'models/Tree Spikes.glb',
 geoblock:       'models/Blocks.glb',
-geoportal:      'models/Portal_ Companion Cube.glb',
-
-// SIXTYSEVEN / MAP67
-glitchpillar:   'models/DJgear.glb',
-datanode:       'models/Mug With Office Tool.glb',
-number:         'models/Cobblestone tile.glb',
-
-// EMOTE
-emojipillar:    'models/Grass Patch.glb',
 
 // CITY
 car:            'models/Car.glb',
 skyscraper:     'models/Skyscraper.glb',
 
 // FEET / BUNNIES
-foot:           'models/Rock.glb',
 bunny:          'models/Bunny.glb',
 
-// SOCKS BASKET
-sock:           'models/Cabbage.glb',
-laundry:        'models/Pond.glb',
-
-// BACKROOMS
-pillar:         'models/Low Building.glb',
-wall:           'models/Cobblestone tile.glb',
-
-// PUBLIC POO
-toilet:         'models/Pond.glb',
-poo:            'models/Cabbage.glb',
-
 // DISCO
-discoball:      'models/DJgear.glb',
-helmet:         'models/Robot.glb',
-booth:          'models/Low Building.glb',
-
-// WINTER / SNOW
-snowman:        'models/Chick.glb',
-icecrystal:     'models/Tree Spikes.glb',
+booth:          'models/DJgear.glb',
+helmet:         'models/Boombox.glb',
 
 // MOON
-crater:         'models/Pond.glb',
 moonrock:       'models/Rock.glb',
-
-// OFFICE
-desk:           'models/Mug With Office Tool.glb',
-cubicle:        'models/Low Building.glb',
-lamp:           'models/Arrow Sign.glb',
 
 // CABBAGE / GARDEN
 cabbage:        'models/Cabbage.glb',
-grass_patch:    'models/Grass Patch.glb',
-
-// MINION LAND
-minion:         'models/Chick.glb',
 
 // TORNADO
-tornado:        'models/Ghoooooost.glb',
+tornado:        'models/Tornado.glb',
 
-// WATERFALL / GRAND CANYON
-waterfall:      'models/Pond.glb',
+// GRAND CANYON
 canyon:         'models/Mountain.glb',
 
 // POOLROOMS
-poolroom_pillar:'models/Low Building.glb',
 poolroom_sign:  'models/Arrow Sign.glb',
 
 // HOGWARTS
-hw_candle:      'models/Christmas Tree.glb',
 hw_stone:       'models/Rock.glb',
-hw_lantern:     'models/Arrow Sign.glb',
-
-// VILLAGE
-haystack:       'models/Grass Patch.glb',
-well:           'models/Pond.glb',
-
-// MINECRAFT
-mc_block:       'models/Blocks.glb',
-mc_tree:        'models/Tree.glb',
-mc_creeper:     'models/Robot.glb',
 
 // SKYBLOCK
 sb_crate:       'models/Blocks.glb',
@@ -372,8 +332,14 @@ sb_crate:       'models/Blocks.glb',
 shiba_inu:      'models/Shiba Inu.glb',
 animated_woman: 'models/Animated Woman.glb',
 
-// EXTRA WORLD OVERRIDE
-island:         'models/Island.glb',
+// LIVING OBSTACLES (entities.js rescales these itself)
+chick:          'models/Chick.glb',
+robot:          'models/Robot.glb',
+duck:           'models/players/Rubber Duck.glb',
+cube:           'models/Portal_ Companion Cube.glb',
+
+// ISLANDS — generated procedurally in graphics.js (textured tops, rocky cliffs,
+// wind-swayed grass), so Island.glb / Island2.glb are no longer used.
 };
 
 // ── GLB LOADER SYSTEM ────────────────────────────────────────────────
@@ -461,6 +427,7 @@ function loadModel(key, callback) {
       if (gltf.animations && gltf.animations.length > 0) {
         group.userData.animations = gltf.animations;  // raw clips only
       }
+      if (typeof GFX !== "undefined" && GFX.fixGLBMaterials) GFX.fixGLBMaterials(group);
       _modelCache[key] = group;
       var pending = _modelPending[key] || [];
       delete _modelPending[key];
@@ -601,7 +568,7 @@ window.debugModelOverrides = function() {
 var DISCS = {
   putter: {
     // Short game only — dead-straight at low speeds, loses stability fast at high power
-    speed: 4, launchMult: 0.85, glide: 3, lift: 0.04, drag: 0.92, turn: 0.001,
+    speed: 5, launchMult: 0.85, glide: 3, lift: 0.04, drag: 0.92, turn: 0.001,
     fade: 0.008, bounce: 0.08, groundSkip: 0.05, stability: 1.5, maxSpin: 7, maxAirtime: 7,
     minPower: 0.0, maxPower: 0.55, optimalPow: 0.35,
     color: 0xffff44, label: "Putter", icon: "🟡",
@@ -610,7 +577,7 @@ var DISCS = {
   },
   midrange: {
     // All-rounder — works at any power, predictable fade, good for gap shots
-    speed: 6, launchMult: 1.0, glide: 5, lift: 0.035, drag: 0.86, turn: 0.008,
+    speed: 7, launchMult: 1.0, glide: 5, lift: 0.035, drag: 0.86, turn: 0.008,
     fade: 0.03, bounce: 0.22, groundSkip: 0.25, stability: 1.1, maxSpin: 10, maxAirtime: 10,
     minPower: 0.15, maxPower: 1.0, optimalPow: 0.6,
     color: 0xff00ff, label: "Midrange", icon: "🟣",
@@ -741,6 +708,19 @@ var MODEL_CONFIG = {
   skyscraper:   { targetHeight: 18.0 },
   minion:       { targetHeight: 1.4  },
   island:         { targetHeight: -1   },   // -1 = terrain.js handles scale
+  tornado:        { targetHeight: 8.0  },
+  furry:          { targetHeight: 3.4  },
+  entity:         { targetHeight: 4.0  },
+  bunny:          { targetHeight: 4.0  },
+  cabbage:        { targetHeight: 1.6  },
+  booth:          { targetHeight: 1.8  },
+  helmet:         { targetHeight: 1.6  },
+  geoblock:       { targetHeight: 2.0  },
+  sb_crate:       { targetHeight: 1.5  },
+  spike:          { targetHeight: 1.6  },
+  screamer:       { targetHeight: 2.6  },
+  arrow:          { targetHeight: 2.4  },
+  poolroom_sign:  { targetHeight: 2.4  },
   shiba_inu:      { targetHeight: 3.5  },  // 2.5× game scale so dog is clearly visible
   animated_woman: { targetHeight: 5.16 },  // 3× scale
 };
@@ -759,16 +739,16 @@ var PLAYER_DISC_TYPES = ["driver", "midrange", "putter", "driver", "midrange"];
 //   2. Reference that key in modelKey below
 //   3. Reload — skin appears in the Skin Locker
 var PLAYER_SKINS = [
-  // id: internal key. name: exact GLB filename (without path/extension) — shown in Skin Locker.
-  // modelKey: must match a MODEL_OVERRIDES key. unlock: requirement text.
-  // backdoorCode: secret code to instantly unlock this skin from the Skin Locker input.
-  { id: "default",  name: "BasePlayer",   icon: "🧍", modelKey: "skin_default", color: null,     unlock: "Always unlocked", free: true,  backdoorCode: null          },
-  { id: "citizen",  name: "Citizen 2",    icon: "🧑", modelKey: "skin_trainer", color: 0xff6600,  unlock: "Always unlocked", free: true,  backdoorCode: null          },
-  { id: "santa",    name: "Santa Claus",  icon: "🎅", modelKey: "skin_robot",   color: 0xcc0000,  unlock: "Play 3 holes",    free: false, backdoorCode: "HOHOHO"      },
-  { id: "crypto",   name: "Crypto Bro",   icon: "💎", modelKey: "skin_crypto",  color: 0xffdd00,  unlock: "Play 9 holes",    free: false, backdoorCode: "MOONLAMBO"   },
-  { id: "chicken",  name: "Chicken Guy",  icon: "🐔", modelKey: "skin_furry",   color: 0xff8800,  unlock: "Get a birdie",    free: false, backdoorCode: "CLUCKCLUCK"  },
-  { id: "duck",     name: "Rubber Duck",  icon: "🦆", modelKey: "skin_ghost",   color: 0xffee00,  unlock: "Play 18 holes",   free: false, backdoorCode: "QUACKQUACK", staticSkin: true },
-  { id: "chef",     name: "Food Worker",  icon: "👨‍🍳", modelKey: "skin_ninja",   color: 0xffffff,  unlock: "Get an ace",      free: false, backdoorCode: "ORDERUP"     },
+  // Every character is playable from the start. They all walk, run and jump.
+  { id: "default",  name: "Sam",          icon: "🧍", modelKey: "skin_default",  color: null,     unlock: "", free: true, blurb: "The all-rounder" },
+  { id: "citizen",  name: "Alex",         icon: "🧑", modelKey: "skin_trainer",  color: 0xff6600, unlock: "", free: true, blurb: "Weekend disc golfer" },
+  { id: "citizen3", name: "Maya",         icon: "👩", modelKey: "skin_citizen3", color: 0x66aaff, unlock: "", free: true, blurb: "League champion" },
+  { id: "runner",   name: "Runner",       icon: "🏃", modelKey: "skin_runner",   color: 0x8affc0, unlock: "", free: true, blurb: "Always in a hurry" },
+  { id: "chef",     name: "Food Worker",  icon: "👨‍🍳", modelKey: "skin_ninja",    color: 0xffffff, unlock: "", free: true, blurb: "On a lunch break" },
+  { id: "crypto",   name: "Crypto Bro",   icon: "💎", modelKey: "skin_crypto",   color: 0xffdd00, unlock: "", free: true, blurb: "To the moon" },
+  { id: "chicken",  name: "Chicken Guy",  icon: "🐔", modelKey: "skin_furry",    color: 0xff8800, unlock: "", free: true, blurb: "Bawk" },
+  { id: "santa",    name: "Santa Claus",  icon: "🎅", modelKey: "skin_robot",    color: 0xcc0000, unlock: "", free: true, blurb: "Off season" },
+  { id: "duck",     name: "Rubber Duck",  icon: "🦆", modelKey: "skin_ghost",    color: 0xffee00, unlock: "", free: true, blurb: "Hops everywhere", staticSkin: true },
 ];
 // Master backdoor: unlocks ALL skins at once
 var PLAYER_SKINS_MASTER_CODE = "TOYOTA";
@@ -1050,8 +1030,8 @@ function saveUnlocked() {
       if (typeof _buildDlGrid === "function" && typeof _dlActiveDisc !== "undefined") _buildDlGrid(_dlActiveDisc);
       if (typeof _buildSkinGrid === "function") _buildSkinGrid();
       var msg = document.createElement("div");
-      msg.textContent = "🚗 TOYOTA CODE — All disc & player skins unlocked!";
-      msg.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a0500;border:3px solid #ff8800;color:#ffd580;padding:16px 28px;z-index:9999;font-family:'Bebas Neue',cursive;font-size:22px;letter-spacing:2px;pointer-events:none;box-shadow:4px 4px 0 #7a2800";
+      msg.textContent = "🚗 Everything unlocked — enjoy!";
+      msg.className = "toast";
       document.body.appendChild(msg);
       setTimeout(function(){msg.remove();},3000);
       _buf = "";

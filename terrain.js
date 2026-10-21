@@ -116,11 +116,19 @@ function _estimateIslandTopRadiusRatio(root) {
 }
 
 function applyThemeVisuals(thName) {
+  // Sky, sun, fog, exposure and environment lighting all come from graphics.js presets
+  if (typeof GFX !== "undefined" && GFX.ready) { GFX.setTheme(thName); return; }
   var t=themeColors[thName]||themeColors.eerie;
   if(scene&&scene.fog) scene.fog.color.setHex(t.fog);
-  if(typeof skyMat!=="undefined"&&skyMat&&skyMat.uniforms){skyMat.uniforms.c1.value.setHex(t.sky1);skyMat.uniforms.c2.value.setHex(t.sky2);}
-  if(typeof hemiLight!=="undefined"&&hemiLight) hemiLight.color.setHex(t.hemi);
-  if(typeof ambLight!=="undefined"&&ambLight) ambLight.color.setHex(t.amb);
+}
+
+// ── ISLAND SURFACE HEIGHT ─────────────────────────────────────────────────────
+// Single source of truth: island top surface = water level + ISLAND_TOP + elev.
+// terrainYIsland (physics), island meshes, moving platforms, basket and tee all use it.
+var ISLAND_TOP = 2.95;
+var TEE_FORWARD = 4.2;   // tee pad distance from the tee island centre, toward the first target
+function islandSurfaceY(hole, elev) {
+  return ((hole && hole.water !== undefined) ? hole.water : -1.5) + ISLAND_TOP + (elev || 0);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -130,7 +138,8 @@ function applyThemeVisuals(thName) {
 var ACTIVE_THEMES = null;
 
 function themeForHole(holeIdx, seed) {
-  if (typeof _SP_FORCED_THEME !== "undefined" && _SP_FORCED_THEME) return _SP_FORCED_THEME;
+  // A map picked for single player must never leak into multiplayer (each client would build a different world)
+  if (typeof _SP_FORCED_THEME !== "undefined" && _SP_FORCED_THEME && !(typeof mpMode !== "undefined" && mpMode)) return _SP_FORCED_THEME;
   var pool = (ACTIVE_THEMES && ACTIVE_THEMES.length > 0) ? ACTIVE_THEMES : THEMES;
   var n = pool.length;
   function makeRng(s){var r=(s^0xdeadbeef)>>>0;return function(){r=(Math.imul(r^(r>>>16),0x45d9f3b)+0x6d2b79f5)>>>0;return r/4294967296;};}
@@ -306,6 +315,7 @@ function buildIslandChain(tpl, idx) {
 // ══════════════════════════════════════════════════════════
 function terrainY(x, z, hole, idx) {
   if (!hole) return 0;
+  if (hole.course) return hole.course.heightAt(x, z);
   return terrainYIsland(x, z, hole, idx);
 }
 
@@ -326,8 +336,7 @@ function terrainY(x, z, hole, idx) {
 // ══════════════════════════════════════════════════════════════════
 function terrainYIsland(x, z, hole, idx) {
   var waterY = (hole.water !== undefined) ? hole.water : -1.5;
-  // Island top surface = waterY + 2.2 (base above water) + 0.55 (cylinder half) + elev
-  var BASE_SURF = waterY + 2.95;   // surface Y for elev=0 islands — matches visual top
+  var BASE_SURF = waterY + ISLAND_TOP;   // surface Y for elev=0 islands — matches visual top
   var best      = waterY - 2.0;    // default = well below water (hazard zone)
 
   // islContrib: returns surface height for a disc at distance d from island centre
@@ -394,9 +403,15 @@ function generateHole(level) {
   var basketPt  = chain[chain.length-1];
 
   // Extract waypoints (everything between tee and basket)
+  // Difficulty scales fairway island size (easy = bigger landing zones)
+  var _isR = (typeof DIFFICULTY_PRESETS !== "undefined" && typeof DIFFICULTY !== "undefined")
+    ? ((DIFFICULTY_PRESETS[DIFFICULTY]||{}).islandRadiusMult || 1.0) : 1.0;
   var waypoints = chain.slice(1,-1).map(function(p){
-    return {x:p.x, z:p.z, r:p.r||7, elev:p.elev||0, type:p.type||"normal"};
+    return {x:p.x, z:p.z, r:Math.max(3.2, (p.r||7) * _isR), elev:p.elev||0, type:p.type||"normal"};
   });
+  // Route length tee → islands → basket (shown on the tee sign)
+  var routeLen = 0, _px = 0, _pz = 0;
+  waypoints.concat([basketPt]).forEach(function(p){ routeLen += Math.hypot(p.x-_px, p.z-_pz); _px = p.x; _pz = p.z; });
 
   // Par scales with number of islands + difficulty
   var par = tmplData.par;
@@ -443,6 +458,7 @@ function generateHole(level) {
     basketElev: basketPt.elev || 0,
     templateType: tpl,
     templateLabel: tmplData.label,
+    routeLen: Math.round(routeLen),
     noiseOx: srng()*100,
     noiseOz: srng()*100,
     movingIslands,
@@ -454,190 +470,209 @@ function generateHole(level) {
 // ══════════════════════════════════════════════════════════
 function buildTerrain(hole, idx) {
   var grp = new THREE.Group();
-  var tc  = themeColors[hole.theme] || themeColors.eerie;
   var waterY = hole.water;
-  function addGrassPatches(parent, centerX, centerY, centerZ, radius, useLocal) {
-    if (typeof loadModel !== "function" || typeof MODEL_OVERRIDES === "undefined" || !MODEL_OVERRIDES["grass_patch"]) return;
-    var patchCount = Math.max(6, Math.min(14, Math.floor(radius * 1.05)));
-    for (var gi = 0; gi < patchCount; gi++) {
-      var ga = srng() * Math.PI * 2;
-      var gd = srng() * Math.max(0.6, radius * 0.55);
-      var px = Math.cos(ga) * gd;
-      var pz = Math.sin(ga) * gd;
-      (function(_px, _pz) {
-        loadModel("grass_patch", function(glbClone) {
-          if (!glbClone) return;
-          var p = new THREE.Group();
-          p.position.set(useLocal ? _px : centerX + _px, centerY, useLocal ? _pz : centerZ + _pz);
-          p.rotation.y = srng() * Math.PI * 2;
-          p.scale.setScalar(0.6 + srng() * 0.6);
-          glbClone.traverse(function(c){ if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-          p.add(glbClone);
-          parent.add(p);
-        });
-      })(px, pz);
-    }
-  }
+  var P = (typeof GFX !== "undefined") ? GFX.themePreset(hole.theme) : null;
+  var floating = !!(P && P.water && P.water.kind === "void");
 
-  // ── Build visual island for each waypoint + tee + basket ──
-  var islandColor  = new THREE.Color(tc.island);
-  var rimColor     = new THREE.Color(tc.rim);
-  // Moving island indices — these get their own animated meshes, skip in static build
+  // Moving island indices — these get their own animated platform entities
   var _movingIdxSet = new Set();
   if (hole.movingIslands) hole.movingIslands.forEach(function(mv){ _movingIdxSet.add(mv.waypointIdx); });
 
+  hole.teeWalkR = 8; hole.basketWalkR = 8;
   var allIslands = [
     {x:0, z:0, r:8, elev:hole.teeElev||0, type:"tee"},
     ...hole.waypoints
       .map(function(wp, wi){ return {x:wp.x,z:wp.z,r:wp.r||7,elev:wp.elev||0,type:wp.type||"normal",_wi:wi}; })
-      .filter(function(wp){ return !_movingIdxSet.has(wp._wi); }),   // skip moving islands
+      .filter(function(wp){ return !_movingIdxSet.has(wp._wi); }),
     {x:hole.bx, z:hole.bz, r:8, elev:hole.basketElev||0, type:"basket"},
   ];
 
-  // ── Theme material palette ────────────────────────────────────────
-  var _tm = hole.theme || "eerie";
-  var _topCol   = new THREE.Color(tc.island);
-  var _sideCol  = new THREE.Color(tc.island).lerp(new THREE.Color(0x111111),0.55);
-  var _grassCol = new THREE.Color(tc.island).lerp(new THREE.Color(0x448833),0.4);
-  var _rockCol  = new THREE.Color(0x665544).lerp(new THREE.Color(tc.island),0.25);
-  var _rimColors = {tee:0x00ff88,basket:0xff6600,narrow:0xff2222,shortcut:0xffff00,raised:0x88aaff};
-
-  // ── Island.glb native measurements (verified from Python GLB inspection):
-  //   Half-width = 0.4465  → scale = r / 0.4465 fills collision radius r
-  //   Top-surface Y = 0.745 (grass primitive maxY)
-  //   Base Y ≈ 0 (dirt primitive minY ≈ -0.01)
-  //   Two materials: Dirt (body) + Grass (top cap) — both preserved from GLB
-  var _ISL_HW = 0.4465;   // native model half-width
-  var _ISL_TY = 0.730;    // native top-surface Y (verified from GLB accessor max.y=0.730)
-
-  // Shared fallback materials (created once, reused — no per-island material spam)
-  var _fbTop  = new THREE.MeshLambertMaterial({color: _topCol});
-  var _fbSide = new THREE.MeshLambertMaterial({color: _sideCol});
-  var _foamM  = new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:0.35,side:THREE.DoubleSide});
+  // Tee faces the first target (first island or the basket); the pad sits at the
+  // front of the tee island like a real tee box
+  var firstT = hole.waypoints[0] || { x: hole.bx, z: hole.bz };
+  var teeYaw = Math.atan2(firstT.x, firstT.z);
+  var _fl = Math.hypot(firstT.x, firstT.z) || 1;
+  hole.teeX = firstT.x / _fl * TEE_FORWARD; hole.teeZ = firstT.z / _fl * TEE_FORWARD;
+  var foam = [];
 
   allIslands.forEach(function(isl) {
-    if (isl.isMoving) return;
-    var r     = Math.max(4, isl.r);
-    var elev  = isl.elev || 0;
-    var surfY = waterY + 2.75 + elev;  // top surface — matches terrainY() exactly
-    var segs  = 12;
-
-    // ── Rim at EXACT collision radius r so visual edge = physics edge ───────
-    var rimCol  = _rimColors[isl.type] || tc.rim;
-    var rimMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(r, 0.14, 5, segs),
-      new THREE.MeshBasicMaterial({color: rimCol})
-    );
-    rimMesh.rotation.x = Math.PI/2;
-    rimMesh.position.set(isl.x, surfY + 0.02, isl.z);
-    //grp.add(rimMesh);
-
-    // ── Shoreline foam at water level ────────────────────────────────────────
-    var foam = new THREE.Mesh(new THREE.RingGeometry(r*0.9, r*0.9+0.6, segs), _foamM);
-    foam.rotation.x = -Math.PI/2;
-    foam.position.set(isl.x, waterY+0.04, isl.z);
-    //grp.add(foam);
-
-    // ── Procedural fallback (instant — shown while GLB loads) ────────────────
-    var _proc = new THREE.Group();
-    var baseY = waterY + 2.2 + elev;
-    var _ft   = new THREE.Mesh(new THREE.CylinderGeometry(r, r*0.9, 0.55, segs), _fbTop);
-    _ft.position.set(isl.x, baseY + 0.26, isl.z);
-    _ft.castShadow = true; _ft.receiveShadow = true;
-    _proc.add(_ft);
-    var depth  = Math.max(2.5, elev+3.5);
-    var _fc    = new THREE.Mesh(new THREE.CylinderGeometry(r*0.88, r*0.55, depth, segs), _fbSide);
-    _fc.position.set(isl.x, baseY+0.275-depth*0.5, isl.z);
-    _fc.castShadow = true;
-    _proc.add(_fc);
-    grp.add(_proc);
-
-    // ── Island.glb async load — replaces procedural on arrival ──────────────
-    // Each call is a fresh clone (loadModel caches source, _cloneGLB clones it)
-    // No re-fetch after first island — model is cached in _modelCache["island"]
-    var _islandKey = hole && hole.islandModelKey ? hole.islandModelKey : "island";
-    if (typeof loadModel === "function" && typeof MODEL_OVERRIDES !== "undefined" && MODEL_OVERRIDES[_islandKey]) {
-      (function(_isl, _r, _surfY, _proc) {
-        loadModel(_islandKey, function(glbClone) {
-          if (!glbClone) return;  // load failed — keep procedural
-          grp.remove(_proc);
-          // Auto-fit any island GLB (Island.glb, Island2.glb, etc.) to gameplay radius/top.
-          glbClone.updateMatrixWorld(true);
-          var _bb = new THREE.Box3().setFromObject(glbClone);
-          var _sz = new THREE.Vector3(); _bb.getSize(_sz);
-          var _hw = Math.max(_sz.x, _sz.z) * 0.5;
-          if (_hw < 0.001) _hw = _ISL_HW;  // safety fallback
-          var _topY = _bb.max.y;
-          var _ratio = _estimateIslandTopRadiusRatio(glbClone);
-          var sc    = _r / _hw;
-          var posY  = _surfY - sc * _topY;
-          var _rotY = srng() * Math.PI * 2;
-          var _walkR = _r * _ratio;
-          if (_isl.type === "tee") hole.teeWalkR = _walkR;
-          else if (_isl.type === "basket") hole.basketWalkR = _walkR;
-          else if (_isl._wi !== undefined && hole.waypoints[_isl._wi]) {
-            hole.waypoints[_isl._wi].walkR = _walkR;
-          }
-          var g2    = new THREE.Group();
-          g2.scale.setScalar(sc);
-          g2.position.set(_isl.x, posY, _isl.z);
-          g2.rotation.y = _rotY;  // keep physics/profile orientation in sync
-          var _tint = new THREE.Color(tc.island);
-          glbClone.traverse(function(c) {
-            if (!c.isMesh) return;
-            c.castShadow = true; c.receiveShadow = true;
-            var _mats = Array.isArray(c.material) ? c.material : [c.material];
-            var _tinted = _mats.map(function(m) {
-              var mc = m.clone();
-              if (mc.color) mc.color.set(_tint);
-              return mc;
-            });
-            c.material = Array.isArray(c.material) ? _tinted : _tinted[0];
-          });
-          g2.add(glbClone);
-          grp.add(g2);
-        });
-      })(isl, r, surfY, _proc);
-    }
-    addGrassPatches(grp, isl.x, surfY + 0.05, isl.z, r, false);
+    var r = Math.max(3.2, isl.r);
+    var surfY = islandSurfaceY(hole, isl.elev);
+    var avoid = [];
+    if (isl.type === "tee") avoid.push({ x: hole.teeX, z: hole.teeZ, r: 2.0 });
+    if (isl.type === "basket") avoid.push({ x: hole.bx, z: hole.bz, r: 0.7 });
+    var island = GFX.buildIsland({ x: isl.x, z: isl.z, r: r, surfY: surfY, waterY: waterY, theme: hole.theme,
+      type: isl.type, floating: floating, avoid: avoid, seed: (idx + 1) * 977 + Math.round(isl.x * 3.1 + isl.z * 1.7) });
+    grp.add(island);
+    if (island.userData.waterlineR > 0) foam.push({ x: isl.x, z: isl.z, r: island.userData.waterlineR });
+    if (isl._wi !== undefined && hole.waypoints[isl._wi]) hole.waypoints[isl._wi].walkR = r;
   });
-;
+  hole._foamStatic = foam;
 
-  // ── Waterfall: falling water planes between height-drop islands ──
+  // ── Tee pad + tee sign ────────────────────────────────────────────────
+  var teeY = islandSurfaceY(hole, hole.teeElev || 0);
+  var pad = buildTeePad(teeYaw, teeY); pad.position.set(hole.teeX, 0, hole.teeZ); grp.add(pad);
+  var sign = buildTeeSign(hole, teeYaw, teeY); sign.position.x += hole.teeX; sign.position.z += hole.teeZ; grp.add(sign);
+
+  // ── Waterfall: falling water sheets between height-drop islands ──
   if (hole.theme === "waterfall") {
-    var fallMat2=new THREE.MeshBasicMaterial({color:0x66bbee,transparent:true,opacity:0.55,side:THREE.DoubleSide});
+    var fallMat2=new THREE.MeshBasicMaterial({color:0x9ad8f0,transparent:true,opacity:0.55,side:THREE.DoubleSide,depthWrite:false});
     for (var wfi=0;wfi<allIslands.length-1;wfi++) {
       var wfA=allIslands[wfi],wfB=allIslands[wfi+1];
       var wfDH=(wfA.elev||0)-(wfB.elev||0);
       if(wfDH>1.5){
         var wfAng=Math.atan2(wfB.x-wfA.x,wfB.z-wfA.z);
         var fall2=new THREE.Mesh(new THREE.PlaneGeometry(wfA.r*1.2,wfDH+2),fallMat2);
-        fall2.position.set(wfA.x,waterY+1.75+(wfA.elev||0)-wfDH*0.5,wfA.z);
+        fall2.position.set(wfA.x,islandSurfaceY(hole,wfA.elev)-wfDH*0.5,wfA.z);
         fall2.rotation.y=wfAng; grp.add(fall2);
-        var mist2=new THREE.Mesh(new THREE.CylinderGeometry(wfA.r*0.7,wfA.r*0.8,0.3,12),fallMat2);
-        mist2.position.set(wfB.x,waterY+1.75+(wfB.elev||0)+0.2,wfB.z); grp.add(mist2);
-        var wfPL=new THREE.PointLight(0x55aaff,0.6,15);
-        wfPL.position.set((wfA.x+wfB.x)/2,waterY+3+(wfA.elev||0)*0.5,(wfA.z+wfB.z)/2); grp.add(wfPL);
       }
     }
   }
 
-  // ── Connecting path beams (show the route visually) ──
-  var beamMat = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.08});
-  for(var i=0; i<allIslands.length-1; i++){
-    var a=allIslands[i], b=allIslands[i+1];
-    var dx=b.x-a.x, dz=b.z-a.z, len2=Math.hypot(dx,dz);
-    if(len2<3) continue;
-    var beam = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.06,len2*0.92), beamMat);
-    beam.position.set((a.x+b.x)/2, waterY+1.75+(a.elev+b.elev)*0.5+0.05, (a.z+b.z)/2);
-    beam.rotation.y = Math.atan2(dx,dz);
-    grp.add(beam);
+  // ── Scenery: distant themed environment + horizon ridges ──
+  var scenery = new THREE.Group();
+  addSceneryBorder(scenery, hole, idx);
+  // Scenery point lights sit 120-230m out with ranges of 20-45m: they never reach the
+  // playfield but every light costs every lit pixel. Floors hidden under opaque water go too.
+  var hasWater = !(P && P.water && (P.water.kind === "none" || P.water.kind === "void"));
+  var drop = [], floors = [];
+  scenery.traverse(function(o) {
+    if (o.isLight) { drop.push(o); return; }
+    if (hasWater && o.isMesh && o.geometry && o.geometry.type === "PlaneGeometry" &&
+        o.geometry.parameters && o.geometry.parameters.width >= 600 && o.position.y <= waterY + 0.05) { drop.push(o); floors.push(o.material); }
+  });
+  drop.forEach(function(o) { if (o.parent) o.parent.remove(o); if (o.geometry) o.geometry.dispose(); });
+  // The old floor plane becomes a ring of land around a lake, so the backdrop
+  // (houses, trees, towers) stands on ground instead of in open water.
+  if (!floors.length && hasWater && P && P.land) floors.push(new THREE.MeshLambertMaterial({ color: P.land }));
+  if (floors.length) {
+    var ring = new THREE.RingGeometry(132, 900, 96, 1); ring.rotateX(-Math.PI / 2);
+    var land = new THREE.Mesh(ring, floors[0]);
+    land.position.y = waterY + 0.35;
+    scenery.add(land);
+    var bank = new THREE.Mesh(new THREE.CylinderGeometry(132, 128, 1.2, 96, 1, true), floors[0]);
+    bank.position.y = waterY - 0.25; bank.material.side = THREE.DoubleSide;
+    scenery.add(bank);
   }
-
-  // ── Scenery: distant cliff walls around the perimeter ──
-  addSceneryBorder(grp, hole, idx);
+  scenery.traverse(function(o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+  GFX.batchStatic(scenery);
+  scenery.add(GFX.buildHorizon(hole));
+  // Centre the backdrop on the course and stretch its footprint for long holes,
+  // so the fairway never runs through the scenery buildings.
+  var _cx = hole.bx * 0.5, _cz = hole.bz * 0.5, _R = 0;
+  [{x:0,z:0}, {x:hole.bx,z:hole.bz}].concat(hole.waypoints).forEach(function(p) { _R = Math.max(_R, Math.hypot(p.x - _cx, p.z - _cz) + 10); });
+  var _sc = Math.max(1, (_R + 30) / 125);
+  scenery.position.set(_cx, 0, _cz);
+  scenery.scale.set(_sc, 1, _sc);
+  scenery.userData.noUpgrade = true;   // far scenery stays on cheap Lambert shading
+  grp.add(scenery);
+  hole._sceneryGroup = scenery;
 
   return grp;
+}
+
+// Distant themed scenery + horizon ridges, centred on the course
+function buildBackdrop(hole, idx, C) {
+  var P = GFX.themePreset(hole.theme), waterY = hole.water;
+  var scenery = new THREE.Group();
+  addSceneryBorder(scenery, hole, idx);
+  var hasWater = !(P && P.water && (P.water.kind === "none" || P.water.kind === "void")) && C.hazard.type !== "none";
+  var drop = [], floors = [];
+  scenery.traverse(function(o) {
+    if (o.isLight) { drop.push(o); return; }
+    if (o.isMesh && o.geometry && o.geometry.type === "PlaneGeometry" && o.geometry.parameters && o.geometry.parameters.width >= 600 && (hasWater ? o.position.y <= waterY + 0.05 : true)) { drop.push(o); floors.push(o.material); }
+  });
+  drop.forEach(function(o) { if (o.parent) o.parent.remove(o); if (o.geometry) o.geometry.dispose(); });
+  if (!floors.length && P && P.land) floors.push(new THREE.MeshLambertMaterial({ color: P.land }));
+  var b = C.bounds, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+  var R = Math.max(60, Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 - 20);
+  if (floors.length) {
+    var ring = new THREE.RingGeometry(132, 900, 96, 1); ring.rotateX(-Math.PI / 2);
+    var land = new THREE.Mesh(ring, floors[0]);
+    land.position.y = hasWater ? waterY + 0.35 : (C.floor !== null ? C.floor - 0.05 : waterY);
+    scenery.add(land);
+  }
+  scenery.traverse(function(o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+  GFX.batchStatic(scenery);
+  scenery.add(GFX.buildHorizon(hole));
+  var sc = Math.max(1, (R + 30) / 125);
+  scenery.position.set(cx, 0, cz);
+  scenery.scale.set(sc, 1, sc);
+  scenery.userData.noUpgrade = true;
+  hole._sceneryGroup = scenery;
+  return scenery;
+}
+
+// Rubber tee pad with painted lines, oriented toward the first target
+function buildTeePad(yaw, surfY) {
+  var g = new THREE.Group();
+  if (!GFX._texCache.teePad) {
+    var c = GFX._canvas(256), x = c.getContext("2d");
+    x.fillStyle = "#2b3a2e"; x.fillRect(0, 0, 256, 256);
+    for (var i = 0; i < 5000; i++) { x.fillStyle = Math.random() < 0.5 ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.06)"; x.fillRect(Math.random() * 256, Math.random() * 256, 1, 1); }
+    x.strokeStyle = "rgba(255,255,255,0.85)"; x.lineWidth = 6; x.strokeRect(8, 8, 240, 240);
+    x.fillStyle = "rgba(255,255,255,0.85)"; x.fillRect(8, 200, 240, 6);
+    GFX._texCache.teePad = GFX._tex(c);
+  }
+  var mat = new THREE.MeshStandardMaterial({ map: GFX._texCache.teePad, roughness: 0.95, metalness: 0 });
+  var pad = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 3.2), mat);
+  pad.position.set(0, surfY + 0.03, -0.6);
+  pad.receiveShadow = true; pad.castShadow = false;
+  g.add(pad);
+  // concrete curb around the pad
+  var curbM = new THREE.MeshStandardMaterial({ color: 0x9a9a92, roughness: 0.9 });
+  var curb = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.05, 3.4), curbM);
+  curb.position.set(0, surfY + 0.02, -0.6); curb.receiveShadow = true; g.add(curb);
+  g.rotation.y = yaw + Math.PI;
+  return g;
+}
+
+// Tee sign: hole number, par, distance and a little map of the route
+function buildTeeSign(hole, yaw, surfY) {
+  var g = new THREE.Group();
+  var c = GFX._canvas(512), x = c.getContext("2d");
+  var grd = x.createLinearGradient(0, 0, 0, 512); grd.addColorStop(0, "#1f3b2a"); grd.addColorStop(1, "#132619");
+  x.fillStyle = grd; x.fillRect(0, 0, 512, 512);
+  x.strokeStyle = "#e8d9a8"; x.lineWidth = 10; x.strokeRect(10, 10, 492, 492);
+  x.fillStyle = "#f4ead0"; x.font = "900 80px Nunito, 'Segoe UI', sans-serif"; x.textAlign = "left";
+  x.fillText("HOLE " + hole.n, 34, 112);
+  x.font = "800 44px Nunito, 'Segoe UI', sans-serif"; x.fillStyle = "#ffcf5a";
+  x.fillText("PAR " + hole.par, 34, 176);
+  x.textAlign = "right"; x.fillStyle = "#f4ead0";
+  x.fillText((hole.routeLen || 0) + " m", 478, 176);
+  // route sketch
+  var pts = [{ x: 0, z: 0, r: 8 }].concat(hole.waypoints).concat([{ x: hole.bx, z: hole.bz, r: 8 }]);
+  var minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  pts.forEach(function(p) { minX = Math.min(minX, p.x - p.r); maxX = Math.max(maxX, p.x + p.r); minZ = Math.min(minZ, p.z - p.r); maxZ = Math.max(maxZ, p.z + p.r); });
+  var bw = 440, bh = 290, sc = Math.min(bw / (maxX - minX), bh / (maxZ - minZ));
+  function MX(px) { return 36 + (px - minX) * sc + (bw - (maxX - minX) * sc) / 2; }
+  function MZ(pz) { return 200 + (pz - minZ) * sc + (bh - (maxZ - minZ) * sc) / 2; }
+  x.fillStyle = "rgba(90,160,200,0.35)"; x.fillRect(30, 196, 452, 298);
+  x.strokeStyle = "rgba(255,255,255,0.55)"; x.setLineDash([10, 10]); x.lineWidth = 4; x.beginPath();
+  pts.forEach(function(p, i) { if (i === 0) x.moveTo(MX(p.x), MZ(p.z)); else x.lineTo(MX(p.x), MZ(p.z)); }); x.stroke(); x.setLineDash([]);
+  pts.forEach(function(p, i) {
+    x.fillStyle = i === 0 ? "#cfe6a0" : i === pts.length - 1 ? "#ffd27a" : "#8fc46a";
+    x.beginPath(); x.arc(MX(p.x), MZ(p.z), Math.max(6, p.r * sc), 0, 6.28); x.fill();
+  });
+  x.fillStyle = "#ff5a2a"; x.beginPath(); x.arc(MX(hole.bx), MZ(hole.bz), 9, 0, 6.28); x.fill();
+  var tex = GFX._tex(c); tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  var board = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 0.06), [
+    new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.8 }), new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }), new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.8 }),
+  ]);
+  board.position.y = 1.75; board.castShadow = true; g.add(board);
+  var postM = new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.9 });
+  [-0.5, 0.5].forEach(function(px) {
+    var post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.4, 0.1), postM);
+    post.position.set(px, 1.2, -0.06); post.castShadow = true; g.add(post);
+  });
+  // Placed beside the pad, facing back toward the player
+  var side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  var back = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+  g.position.set(side.x * 2.6 - back.x * 0.6, surfY, side.z * 2.6 - back.z * 0.6);
+  g.rotation.y = yaw + Math.PI + 0.35;
+  return g;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -650,42 +685,7 @@ function addSceneryBorder(grp, hole, idx) {
   var wY  = hole.water;
   var N   = (hole.noiseOx||0);  // noise offset for variety per hole
 
-  // ── UNIVERSAL BACKGROUND LAYER ──────────────────────────────────
-  // Every theme gets a far ring of 24 large terrain chunks at 250-380u
-  // to hide the void. These are layered at various heights so no flat
-  // horizon is ever visible.
-  var farMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(tc.island).lerp(new THREE.Color(0x111122), 0.7)
-  });
-  for (var fi = 0; fi < 24; fi++) {
-    var fa = (fi / 24) * Math.PI * 2 + srng() * 0.4;
-    var fR = 250 + srng() * 130;
-    var fx = Math.cos(fa) * fR, fz = Math.sin(fa) * fR;
-    var fh = 35 + srng() * 80, fw = 40 + srng() * 60;
-    var far = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fw * 0.7), farMat);
-    far.position.set(fx, wY + fh * 0.35 - 10, fz);
-    far.rotation.y = fa; grp.add(far);
-  }
-
-  // ── ANIMATED CLOUDS (universal) ─────────────────────────────────
-  // Flat sphere clusters at high altitude rotate slowly — hides sky seams
-  var cloudMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(tc.sky2||0x222244).lerp(new THREE.Color(0xffffff), 0.15),
-    transparent: true, opacity: 0.18
-  });
-  for (var ci = 0; ci < 12; ci++) {
-    var ca = (ci / 12) * Math.PI * 2 + N * 0.3;
-    var cR = 180 + srng() * 80, ch = wY + 55 + srng() * 40;
-    var cloud = new THREE.Group();
-    for (var cj = 0; cj < 4; cj++) {
-      var cs = new THREE.Mesh(new THREE.SphereGeometry(12 + srng() * 10, 6, 4), cloudMat);
-      cs.position.set((srng()-0.5)*25, (srng()-0.5)*8, (srng()-0.5)*25);
-      cs.scale.y = 0.3 + srng() * 0.25; cloud.add(cs);
-    }
-    cloud.position.set(Math.cos(ca)*cR, ch, Math.sin(ca)*cR);
-    cloud.userData.rotY = (srng() - 0.5) * 0.003;  // slow drift
-    grp.add(cloud);
-  }
+  // Horizon ridges + sky-shader clouds (graphics.js) replace the old box ring / sphere clouds.
 
   switch (hole.theme) {
 
@@ -901,7 +901,26 @@ function addSceneryBorder(grp, hole, idx) {
     }
 
     // ── MINION / FUNNY ────────────────────────────────────────────
-    case "minion": case "funny": {
+    case "funny": {
+      // Hot-air balloons drifting over the lagoon and a big soft rainbow
+      var bcols=[0xff5a8a,0xffd23a,0x3ab0ff,0x8ae05a,0xb46aff,0xff8a3a];
+      for(var hb=0;hb<9;hb++){
+        var ha=(hb/9)*Math.PI*2+srng()*0.5, hr=150+srng()*70, hy=wY+28+srng()*30, hc=bcols[hb%bcols.length];
+        var env=new THREE.Mesh(new THREE.SphereGeometry(7,16,12),new THREE.MeshLambertMaterial({color:hc}));
+        env.scale.y=1.2; env.position.set(Math.cos(ha)*hr,hy,Math.sin(ha)*hr); grp.add(env);
+        var stripe=new THREE.Mesh(new THREE.CylinderGeometry(7.05,7.05,2.2,16,1,true),new THREE.MeshLambertMaterial({color:0xffffff,side:THREE.DoubleSide}));
+        stripe.position.copy(env.position); grp.add(stripe);
+        var bk=new THREE.Mesh(new THREE.BoxGeometry(2.2,1.6,2.2),new THREE.MeshLambertMaterial({color:0x8a5a32}));
+        bk.position.set(env.position.x,hy-11,env.position.z); grp.add(bk);
+      }
+      var rb=["#ff5a5a","#ffa83a","#ffe14a","#6ae05a","#3ab0ff","#8a6aff"];
+      rb.forEach(function(col,ri){
+        var arc=new THREE.Mesh(new THREE.TorusGeometry(120-ri*4,2,6,64,Math.PI),new THREE.MeshBasicMaterial({color:new THREE.Color(col),transparent:true,opacity:0.32,depthWrite:false,fog:false}));
+        arc.position.set(-60,wY-10,-260); grp.add(arc);
+      });
+      break;
+    }
+    case "minion": {
       var yMat2=new THREE.MeshLambertMaterial({color:0xffdd00});
       var bMat3=new THREE.MeshLambertMaterial({color:0x2244bb});
       var chiM2=new THREE.MeshLambertMaterial({color:0x888888});
@@ -1395,6 +1414,7 @@ function buildInstancedGrass(hole, idx) {
 
 // ── Water plane ──────────────────────────────────────────
 function buildWater(hole) {
+  if (typeof GFX !== "undefined" && GFX.ready) return GFX.buildWater(hole);
   var tc  = themeColors[hole.theme]||themeColors.eerie;
   var geo = new THREE.PlaneGeometry(900,900); geo.rotateX(-Math.PI/2);
   var mat = new THREE.MeshBasicMaterial({color:tc.water||0x0044aa,transparent:true,opacity:hole.theme==="moon"?0:0.82});

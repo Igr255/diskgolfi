@@ -25,6 +25,7 @@ function _netReplacer(key, val) {
 }
 
 function _destroyPeer(cb) {
+  _relayStop();
   if (!peer) { cb(); return; }
   try { peer.off("error"); peer.off("open"); peer.off("connection"); peer.destroy(); } catch(e) {}
   peer = null;
@@ -32,6 +33,166 @@ function _destroyPeer(cb) {
 }
 
 var _hostRawCode = "";  // persists the lobby code for 3D lobby display
+
+// Follow a connection's WebRTC (ICE) state so a link that can't be made fails
+// fast with a clear message instead of hanging on "connecting…"
+function _watchIce(c, cb) {
+  var last = "", iv = setInterval(function() {
+    if (c.open) { clearInterval(iv); return; }
+    var pc = c.peerConnection, st = pc ? pc.iceConnectionState : "new";
+    if (st !== last) { last = st; cb(st); }
+    if (st === "failed" || st === "closed") clearInterval(iv);
+  }, 400);
+  return function() { clearInterval(iv); };
+}
+// ══════════════════════════════════════════════════════════════════════
+// ── RELAY FALLBACK ────────────────────────────────────────────────────
+// When the direct browser-to-browser link is blocked (mobile data, strict
+// routers, school / office networks) the game talks through a public MQTT
+// message broker over secure WebSockets instead. No account needed.
+// A RelayConn behaves like a PeerJS DataConnection (on/send/close/open), so
+// the rest of the multiplayer code doesn't care which path a player uses.
+// Topics: dgolf/v1/<code>/h  ← guests → host     dgolf/v1/<code>/g/<id>  ← host → guest
+// ══════════════════════════════════════════════════════════════════════
+var RELAY_BROKERS = ["wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt"];
+var _hubs = [];        // host: one per transport it listens on;  guest: the one it joined through
+var _relayErr = "";    // why the internet relay couldn't be used (for the error message)
+
+function _loadMqtt(cb) {
+  if (window.mqtt) { cb(true); return; }
+  var urls = ["lib/mqtt.min.js", "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js", "https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"];
+  (function next(i) {
+    if (i >= urls.length) { cb(false); return; }
+    var sc = document.createElement("script"); sc.src = urls[i];
+    sc.onload = function() { if (window.mqtt) cb(true); else next(i + 1); }; sc.onerror = function() { next(i + 1); };
+    document.head.appendChild(sc);
+  })(0);
+}
+// A "bus" is a tiny pub/sub transport: { kind, pub(topic, str), sub(topic, done), onMsg(fn), onClose(fn), end() }
+// Internet relay: public MQTT brokers over secure WebSockets. Host and guest
+// both use every broker at once, so they always meet on whichever one works.
+function _busRelayOne(url, cb) {
+  var done = false, cl;
+  try { cl = mqtt.connect(url, { connectTimeout: 8000, reconnectPeriod: 0, clean: true, clientId: "dg_" + Math.random().toString(36).slice(2, 10) }); }
+  catch (e) { cb(null); return; }
+  var fail = function() { if (done) return; done = true; try { cl.end(true); } catch (e) {} cb(null); };
+  cl.once("connect", function() {
+    if (done) return; done = true;
+    cb({ kind: "relay", url: url, pub: function(t, m) { cl.publish(t, m); }, sub: function(t, d) { cl.subscribe(t, d); },
+      onMsg: function(fn) { cl.on("message", function(t, buf) { fn(t, buf.toString()); }); },
+      onClose: function(fn) { cl.on("close", fn); }, end: function() { try { cl.end(true); } catch (e) {} } });
+  });
+  cl.once("error", fail);
+  setTimeout(fail, 9000);
+}
+// cb(bus) for every broker that connects; done(count) once all have answered
+function _busRelayAll(cb, done) {
+  _loadMqtt(function(ok) {
+    if (!ok) { _relayErr = "the relay library couldn't load (an ad-blocker or privacy add-on may be blocking it)"; done(0); return; }
+    var left = RELAY_BROKERS.length, n = 0;
+    RELAY_BROKERS.forEach(function(url) {
+      _busRelayOne(url, function(bus) {
+        if (bus) { n++; cb(bus); }
+        if (--left === 0) { if (!n) _relayErr = "the relay servers couldn't be reached from this network"; done(n); }
+      });
+    });
+  });
+}
+// Same browser, other tab: BroadcastChannel (no network at all)
+function _busLocal() {
+  if (typeof BroadcastChannel === "undefined") return null;
+  var ch = new BroadcastChannel("diskgolfi-mp"), subs = {}, fns = [];
+  ch.onmessage = function(e) { var m = e.data; if (m && subs[m.t]) fns.forEach(function(f) { f(m.t, m.s); }); };
+  return { kind: "local", pub: function(t, m) { ch.postMessage({ t: t, s: m }); }, sub: function(t, d) { subs[t] = 1; if (d) d(); },
+    onMsg: function(fn) { fns.push(fn); }, onClose: function() {}, end: function() { try { ch.close(); } catch (e) {} } };
+}
+
+// A RelayConn behaves like a PeerJS DataConnection (on / send / close / open)
+function RelayConn(sendFn, kind) { this._send = sendFn; this.open = false; this._h = {}; this.viaRelay = kind === "relay"; this.viaLocal = kind === "local"; this.peerConnection = null; }
+RelayConn.prototype.on = function(ev, fn) { (this._h[ev] = this._h[ev] || []).push(fn); return this; };
+RelayConn.prototype._emit = function(ev, a) { (this._h[ev] || []).slice().forEach(function(f) { try { f(a); } catch (e) { console.error(e); } }); };
+RelayConn.prototype.send = function(raw) { if (this.open) this._send(typeof raw === "string" ? raw : JSON.stringify(raw)); };
+RelayConn.prototype.close = function() { var was = this.open; this.open = false; try { this._send(null); } catch (e) {} if (was) this._emit("close"); };
+
+// Host side: accept guests arriving on a bus.  Topics: dgolf/v1/<code>/h (to host), /g/<guest> (to guest)
+function _hubHost(bus, code, onConn) {
+  var base = "dgolf/v1/" + code, hub = { bus: bus, conns: {} };
+  _hubs.push(hub);
+  bus.sub(base + "/h");
+  bus.onMsg(function(topic, str) {
+    if (topic !== base + "/h") return;
+    var m; try { m = JSON.parse(str); } catch (e) { return; }
+    if (!m || !m.g) return;
+    var rc = hub.conns[m.g];
+    if (m.hello) {
+      if (!rc) {
+        rc = new RelayConn(function(raw) { bus.pub(base + "/g/" + m.g, raw === null ? JSON.stringify({ bye: 1 }) : JSON.stringify({ d: raw })); }, bus.kind);
+        hub.conns[m.g] = rc;
+        onConn(rc);
+        rc.open = true; rc._emit("open");
+      }
+      bus.pub(base + "/g/" + m.g, JSON.stringify({ welcome: 1 }));
+    } else if (m.bye) { if (rc) { delete hub.conns[m.g]; if (rc.open) { rc.open = false; rc._emit("close"); } } }
+    else if (rc && m.d !== undefined) rc._emit("data", m.d);
+  });
+  bus.onClose(function() { Object.keys(hub.conns).forEach(function(g) { var c = hub.conns[g]; if (c.open) { c.open = false; c._emit("close"); } }); });
+}
+function _relayHostStart(code, onConn) {
+  _relayStop();
+  var lb = _busLocal(); if (lb) _hubHost(lb, code, onConn);
+  _busRelayAll(function(bus) {
+    if (!peer || _hostRawCode !== code) { bus.end(); return; }   // lobby closed meanwhile
+    _hubHost(bus, code, onConn);
+  }, function(n) { if (!n) console.warn("DiskGolfi: internet relay unavailable — " + _relayErr); });
+}
+// Guest side: say hello on a bus until the host welcomes us; cb(conn) or cb(null) after `tries` seconds
+function _hubJoin(bus, code, tries, cb) {
+  var base = "dgolf/v1/" + code, gid = Math.random().toString(36).slice(2, 10), mine = base + "/g/" + gid;
+  var hub = { bus: bus, conns: {} }; _hubs.push(hub);
+  var rc = new RelayConn(function(raw) { bus.pub(base + "/h", JSON.stringify(raw === null ? { g: gid, bye: 1 } : { g: gid, d: raw })); }, bus.kind);
+  var settled = false, n = 0, step = bus.kind === "local" ? 150 : 1000;
+  var say = function() { bus.pub(base + "/h", JSON.stringify({ g: gid, hello: 1 })); };
+  var iv = setInterval(function() {
+    if (settled) { clearInterval(iv); return; }
+    if (++n * step > tries * 1000) { clearInterval(iv); settled = true; bus.end(); _hubs.splice(_hubs.indexOf(hub), 1); cb(null); return; }
+    say();
+  }, step);
+  bus.onMsg(function(topic, str) {
+    if (topic !== mine) return;
+    var m; try { m = JSON.parse(str); } catch (e) { return; }
+    if (m.welcome && !settled) { settled = true; clearInterval(iv); rc.open = true; cb(rc); rc._emit("open"); }
+    else if (m.bye && rc.open) { rc.open = false; rc._emit("close"); }
+    else if (m.d !== undefined && rc.open) rc._emit("data", m.d);
+  });
+  bus.onClose(function() { if (rc.open) { rc.open = false; rc._emit("close"); } });
+  bus.sub(mine, say);
+}
+function _relayJoin(code, cb) {
+  var won = false, pending = 0, connected = false, allIn = false;
+  var finish = function() { if (!won && allIn && pending === 0) cb(null, connected ? "nohost" : "norelay"); };
+  _busRelayAll(function(bus) {
+    connected = true; pending++;
+    _hubJoin(bus, code, 12, function(rc) {
+      pending--;
+      if (rc && !won) { won = true; cb(rc, ""); }
+      else if (rc) rc.close();          // another broker got there first
+      finish();
+    });
+  }, function() { allIn = true; finish(); });
+}
+function _relayStop() {
+  _hubs.forEach(function(h) {
+    try { Object.keys(h.conns).forEach(function(g) { h.conns[g].close(); }); } catch (e) {}
+    h.bus.end();
+  });
+  _hubs = [];
+}
+
+var _NET_FAIL_MSG = "Couldn't connect — neither a direct link nor the relay worked. Check both devices are online and try again.";
+function _relayFailMsg(why) {
+  if (why === "nohost") return "The host didn't answer on the relay. Ask the host to reload the page and host again, then retry.";
+  return "Couldn't connect: the direct link is blocked and " + (_relayErr || "the relay failed") + ".";
+}
 
 function sendToAll(data) {
   const raw = JSON.stringify(data, _netReplacer);
@@ -60,6 +221,7 @@ function setupConnForPlayer(c, pIdx) {
     } catch (e) {}
   });
   c.on("close", () => {
+    if (conns[pIdx] !== c) return;   // an abandoned attempt (e.g. replaced by the relay) — not a real disconnect
     var dName = playerNames[pIdx] || ("Player " + (pIdx+1));
     conns[pIdx] = null;
     if (pIdx === 0 && myIdx !== 0) {
@@ -87,6 +249,8 @@ function handleMsg(msg) {
   const from = msg.from !== undefined ? msg.from : 1;
 
   if (msg.t === "start") {
+    if (typeof msg.hostNow === "number") _clockOff = msg.hostNow - Date.now();   // align to the host's clock
+    _SP_FORCED_THEME = null;
     myIdx        = msg.myIdx;
     playerCount  = msg.playerCount;
     playerNames  = msg.names || playerNames;
@@ -100,6 +264,7 @@ function handleMsg(msg) {
       });
     }
     if (msg.remoteSkins) window._remoteSkins = msg.remoteSkins;
+    if (msg.remoteCos) window._remoteCos = msg.remoteCos;
     if (msg.holeCount)  HOLE_COUNT = msg.holeCount;
     if (msg.difficulty) DIFFICULTY = msg.difficulty;
     if (msg.weather) setWeather(msg.weather);
@@ -123,12 +288,19 @@ function handleMsg(msg) {
     buildScoreboardUI();
     updateMpUI();
 
+  } else if (msg.t === "ents") {
+    if (typeof ENT !== "undefined") ENT.applyNet(msg);
+  } else if (msg.t === "ent_boom") {
+    if (msg.h === holeIdx && typeof ENT !== "undefined") ENT.explode(msg.x, msg.y, msg.z);
+  } else if (msg.t === "crumble") {
+    if (msg.h === holeIdx && HOLES[holeIdx] && HOLES[holeIdx].course) HOLES[holeIdx].course.crumbleRemote(msg.i);
   } else if (msg.t === "pos") {
     var _rp2=remotePlayers[from];
     if(_rp2){
       // Don't override position while they're mid-punch-flight — stepDisc drives it
-      if (!_rp2.flying) { _rp2.targetX=msg.px; _rp2.targetZ=msg.pz; }
-      else              { /* punched — let physics run */ }
+      _rp2.targetX=msg.px; _rp2.targetZ=msg.pz;
+      if(typeof msg.py==="number") _rp2.targetY=msg.py;
+      if(typeof msg.an==="string") _rp2.anim=msg.an;
       if(typeof msg.aim==="number") _rp2.aimAngle=msg.aim;
       if(typeof msg.yaw==="number") _rp2.targetYaw=msg.yaw;
       if(typeof msg.vm==="number")  _rp2.velMag=msg.vm;
@@ -137,8 +309,17 @@ function handleMsg(msg) {
   } else if (msg.t === "throw") {
     const rp = remotePlayers[from];
     if (rp) {
+      // Simulate with the disc they actually threw (not the slot default)
+      if (msg.disc && DISCS[msg.disc] && (msg.disc !== rp.discType || (msg.skin || "classic") !== rp.discSkin)) {
+        if (rp.discMesh) scene.remove(rp.discMesh);
+        rp.discType = msg.disc; rp.discSkin = msg.skin || "classic";
+        rp.discMesh = buildDisc(msg.disc, 0.85, rp.discSkin);
+        rp.discMesh.scale.setScalar(DISC_SCALE_FLIGHT);
+        scene.add(rp.discMesh);
+      }
       rp.discPos.set(msg.px, msg.py, msg.pz);
       rp.discVel.set(msg.vx, msg.vy, msg.vz);
+      rp.bankArr = [msg.hz || 0];
       rp.spin    = Math.hypot(msg.vx, msg.vz) * 3;
       rp.flying  = true;
     }
@@ -157,6 +338,7 @@ function handleMsg(msg) {
       // Store their skin so we can use it when building their avatar
       if (!window._remoteSkins) window._remoteSkins = {};
       window._remoteSkins[from] = msg.playerSkin || "default";
+      window._remoteCos = window._remoteCos || {}; window._remoteCos[from] = msg.cos || null;
       if (myIdx === 0) {
         conns.forEach((oc, oi) => { if (oc && oc.open) oc.send(JSON.stringify({ t:"player_joined", playerCount, names:playerNames }, _netReplacer)); });
       }
@@ -199,10 +381,7 @@ function handleMsg(msg) {
     } else if (remotePlayers[msg.target]) {
       // Observer — knockback the remote player's avatar position (NOT disc flight)
       var _rp = remotePlayers[msg.target];
-      _rp.discPos.set(_px, _py, _pz);
-      // Store knockback velocity on the remote player — physics.js drains it
-      _rp.punchKnockVelX = _vx * 0.22;
-      _rp.punchKnockVelZ = _vz * 0.22;
+      // Their own client moves their body (and broadcasts it); we just show the stagger
       _rp.punchStagger   = _stg;
       _rp.punchImmunity  = _stg + 0.2;
       _rp.punchKnockDir  = { x: msg.dx || 0, z: msg.dz || 0 };
@@ -210,7 +389,7 @@ function handleMsg(msg) {
       if (_rp.avatarMesh && typeof switchAvatarAnim === "function") {
         switchAvatarAnim(_rp.avatarMesh, "jump");
       }
-      if (typeof _spawnBonkText === "function") _spawnBonkText(_rp.discPos.clone());
+      if (typeof _spawnBonkText === "function") _spawnBonkText((_rp.body || _rp.discPos).clone());
     }
     if (msg.target !== myIdx && typeof _screenShake !== "undefined") {
       _screenShake = 0.15; _screenShakeT = 0.2;
@@ -232,6 +411,7 @@ function handleMsg(msg) {
 
   } else if (msg.t === "game_over") {
     showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
+    if (typeof PF !== "undefined") PF.matchEnd(msg.totals);
     setTimeout(function() {
       hideMsg();
       document.getElementById("menu").style.display = "flex";
@@ -244,6 +424,11 @@ function handleMsg(msg) {
     if (typeof equippedSkins !== "undefined") {
       equippedSkins["p"+from+"_"+msg.disc] = msg.skin;
     }
+
+  } else if (msg.t === "cos_equip") {
+    window._remoteCos = window._remoteCos || {}; window._remoteCos[msg.from] = msg.cos;
+    var _crp = remotePlayers[msg.from];
+    if (_crp && _crp.avatarMesh && _crp.avatarMesh.userData.glbLoaded) COS.dressAvatar(_crp.avatarMesh, msg.cos);
 
   } else if (msg.t === "skin_equip") {
     if (typeof equippedSkins !== "undefined" && msg.from !== undefined) {
@@ -294,6 +479,7 @@ function handleMsg(msg) {
     if (msg.names) playerNames = msg.names;
     // Store skin map from host so we can display everyone's skin in lobby
     if (msg.allSkins) window._remoteSkins = msg.allSkins;
+    if (msg.allCos) window._remoteCos = msg.allCos;
     // Also store our own skin so host can see it
     if (!window._remoteSkins) window._remoteSkins = {};
     window._remoteSkins[myIdx] = (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default";
@@ -333,6 +519,7 @@ function checkAllDone() {
         // MP game over — inform all
         sendToAll({ t: "game_over", totals: mpTotals, names: playerNames });
         showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
+        if (typeof PF !== "undefined") PF.matchEnd(mpTotals);
         setTimeout(() => {
           hideMsg();
           document.getElementById("menu").style.display = "flex";
@@ -359,6 +546,7 @@ function checkAllDone() {
 // ── HOST GAME ────────────────────────────────────────────────────────────────
 // ── LEAVE / RESET MULTIPLAYER ───────────────────────────────────────
 function leaveLobby() {
+  _relayStop();
   if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
   conns.fill(null);
   myIdx = 0; playerCount = 1; mpMode = false; hostGameStarted = false;
@@ -373,6 +561,7 @@ function leaveLobby() {
   document.getElementById("menu").style.display = "flex";
   document.getElementById("ui").style.display   = "none";
   phase = "MENU";
+  if (typeof menuView === "function") menuView("home");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -384,23 +573,24 @@ function _build3DLobby(container) {
   if (typeof THREE === "undefined") return;
 
   var lRen = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  lRen.outputEncoding = THREE.sRGBEncoding;
+  lRen.toneMapping = THREE.ACESFilmicToneMapping;
   lRen.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   lRen.setSize(window.innerWidth, window.innerHeight);
-  lRen.setClearColor(0x1a0500, 1);
+  lRen.setClearColor(0xbfe4f5, 1);
   container.appendChild(lRen.domElement);
 
   var lScn = new THREE.Scene();
-  lScn.fog = new THREE.FogExp2(0x220800, 0.016);
+  lScn.fog = new THREE.FogExp2(0xbfe4f5, 0.010);
 
   // Sky
   var _lSkyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
-    uniforms: { c1:{ value: new THREE.Color(0x3d1000) }, c2:{ value: new THREE.Color(0x000000) } },
+    uniforms: { c1:{ value: new THREE.Color(0xd2ecfb) }, c2:{ value: new THREE.Color(0x3a8fe0) } },
     vertexShader:"varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}",
-    fragmentShader:"uniform vec3 c1;uniform vec3 c2;varying vec3 vP;void main(){float t=clamp(vP.y/280.,0.,1.);gl_FragColor=vec4(mix(c1,c2,t*t),1.);}"
+    fragmentShader:"uniform vec3 c1;uniform vec3 c2;varying vec3 vP;void main(){float t=clamp(vP.y/220.,0.,1.);gl_FragColor=vec4(mix(c1,c2,t*t),1.);gl_FragColor=linearToOutputTexel(gl_FragColor);}"
   });
-  var _lSkyGeo = new THREE.SphereGeometry(480,10,7);
-  _lSkyGeo.scale(-1,1,1);
+  var _lSkyGeo = new THREE.SphereGeometry(360,24,12);   // inside the lobby camera's far plane (400)
   lScn.add(new THREE.Mesh(_lSkyGeo, _lSkyMat));
 
   // Lighting
@@ -697,9 +887,8 @@ function _update3DLobbyPlayers() {
     _lobby3D.scene.add(av.mesh);
     // Name label
     var nl = document.createElement("div");
-    nl.style.cssText = "position:absolute;font-family:'Bebas Neue',cursive;font-size:13px;" +
-      "color:"+hexCols[i%hexCols.length]+";pointer-events:none;transform:translateX(-50%);" +
-      "text-shadow:2px 2px 0 #000;letter-spacing:1px;white-space:nowrap;display:none;";
+    nl.className = "lobby-name";
+    nl.style.boxShadow = "inset 3px 0 0 " + hexCols[i % hexCols.length];
     nl.textContent = (playerNames[i]||("P"+(i+1))) + (i===0?" 👑":"") + (i===myIdx?" ◀":"");
     _lobby3D.overlay.appendChild(nl);
     av.nameLabel = nl;
@@ -707,27 +896,24 @@ function _update3DLobbyPlayers() {
   }
 
   // Refresh HUD overlay
-  var rawCode = typeof _hostRawCode !== "undefined" && _hostRawCode ? _hostRawCode.toUpperCase() : "------";
+  var rawCode = (myIdx === 0 ? (typeof _hostRawCode !== "undefined" && _hostRawCode) : window._joinedCode) || "------";
+  rawCode = rawCode.toUpperCase();
   var isHost  = myIdx === 0;
   var _oldHud = _lobby3D.overlay.querySelector("#lobby3d-hud");
   if (_oldHud) _oldHud.remove();
   var hud = document.createElement("div");
   hud.id = "lobby3d-hud";
-  hud.style.cssText = "pointer-events:all;position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;";
   hud.innerHTML =
-    "<div style='background:rgba(22,5,0,.9);border:3px solid #ff8800;display:inline-block;padding:8px 20px;box-shadow:4px 4px 0 #7a2800;min-width:260px'>" +
-    "<div style='font-family:Bebas Neue,cursive;font-size:10px;color:#cc8833;letter-spacing:2px;text-transform:uppercase'>Share Code</div>" +
-    "<div style='font-family:Bebas Neue,cursive;font-size:44px;color:#ffcc00;letter-spacing:7px;text-shadow:3px 3px 0 #7a5000;cursor:pointer' onclick='copyCode()'>"+rawCode+"</div>" +
-    "<div style='font-family:Bebas Neue,cursive;font-size:10px;color:#ff8800;letter-spacing:1px'>"+playerCount+" / "+MAX_PLAYERS+" PLAYERS</div>" +
-    "<div style='font-family:Bebas Neue,cursive;font-size:10px;color:#cc8833;margin-top:3px;letter-spacing:1px'>WASD: Move &nbsp;·&nbsp; R: Punch</div>" +
-    (isHost && playerCount>=2
-      ? "<button class='mbtn' style='margin-top:7px;padding:9px 22px;font-size:16px' onclick='hostStartGame()'>▶ START GAME</button>"
-      : isHost
-        ? "<div style='font-size:10px;color:#cc8833;margin-top:5px;font-family:Bebas Neue,cursive;letter-spacing:1px'>Waiting for players…</div>"
-        : "<div style='font-size:10px;color:#cc8833;margin-top:5px;font-family:Bebas Neue,cursive;letter-spacing:1px'>Waiting for host…</div>"
-    ) +
-    "<br><button class='mbtn sec' style='margin-top:5px;padding:3px 12px;font-size:11px' onclick='leaveLobby()'>✕ LEAVE</button>" +
-    "</div>";
+    "<div class='sheet'>" +
+    "<span class='k'>Share this code</span>" +
+    "<div class='code' onclick='copyCode()' title='Click to copy'>" + rawCode + "</div>" +
+    "<div class='lobby-meta'>" + playerCount + " / " + MAX_PLAYERS + " players · walk with WASD · R to bonk</div>" +
+    "<div class='lobby-actions'>" +
+    (isHost && playerCount >= 2
+      ? "<button class='btn primary big block' onclick='hostStartGame()'>Start game</button>"
+      : "<div class='status'>" + (isHost ? "Waiting for players…" : "Waiting for the host to start…") + "</div>") +
+    "<button class='btn block' onclick='leaveLobby()'>Leave</button>" +
+    "</div></div>";
   _lobby3D.overlay.appendChild(hud);
 }
 
@@ -801,18 +987,31 @@ function hostGame() {
     playerNames[0] = (_uIn && _uIn.value.trim()) ? _uIn.value.trim() : "Player 1";
     updateLobbyUI();
   });
-  peer.on("connection", (c) => {
+  peer.on("connection", (c) => _hostIncoming(c));
+  _relayHostStart(rawCode, _hostIncoming);
+  });
+}
+
+// A guest knocking — via a direct WebRTC link or through the relay
+function _hostIncoming(c) {
     if (playerCount >= MAX_PLAYERS || hostGameStarted) { c.close(); return; }
-    const newIdx = playerCount++;
-    conns[newIdx] = c;
-    playerNames[newIdx] = "Player " + (newIdx + 1);
+    var _stopWatch = _watchIce(c, function(st) {
+      if (st === "failed") { try { c.close(); } catch (e) {} var ms = document.getElementById("mp-status"); if (ms) ms.textContent = "A player tried to join but their network blocked the link."; }
+    });
     c.on("open", () => {
+      _stopWatch();
+      if (playerCount >= MAX_PLAYERS || hostGameStarted) { c.close(); return; }
+      const newIdx = playerCount++;          // a slot is only taken once the link actually works
+      conns[newIdx] = c;
+      playerNames[newIdx] = "Player " + (newIdx + 1);
+      setupConnForPlayer(c, newIdx);
       var _allSkins = Object.assign({}, window._remoteSkins || {});
       _allSkins[0] = (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default";
-      c.send(JSON.stringify({ t: "player_joined", yourIdx: newIdx, playerCount, names: playerNames, allSkins: _allSkins }, _netReplacer));
+      var _allCos = Object.assign({}, window._remoteCos || {}); _allCos[0] = COS.equipped();
+      c.send(JSON.stringify({ t: "player_joined", yourIdx: newIdx, playerCount, names: playerNames, allSkins: _allSkins, allCos: _allCos }, _netReplacer));
       conns.forEach((oc, oi) => {
         if (oi !== newIdx && oi !== 0 && oc && oc.open)
-          oc.send(JSON.stringify({ t: "player_joined", playerCount, names: playerNames, allSkins: _allSkins }));
+          oc.send(JSON.stringify({ t: "player_joined", playerCount, names: playerNames, allSkins: _allSkins, allCos: _allCos }));
       });
       updateLobbyUI();
       // Show 3D lobby on host screen when first player joins
@@ -831,13 +1030,11 @@ function hostGame() {
         }
       }
     });
-    setupConnForPlayer(c, newIdx);
-  });
-  });
 }
 
 function hostStartGame() {
   AudioEngine.init();
+  _SP_FORCED_THEME = null;
   hostGameStarted = true;
   mpMode          = true;
   matchSeed       = Math.floor(Math.random() * 1000000000);
@@ -850,10 +1047,10 @@ function hostStartGame() {
     // Build complete skin map: host idx=0 + all remote players
     var _fullSkins = Object.assign({}, window._remoteSkins || {});
     _fullSkins[0] = (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default";
-    sendTo(pIdx, { t: "start", myIdx: pIdx, playerCount, names: playerNames, matchSeed,
+    sendTo(pIdx, { t: "start", myIdx: pIdx, playerCount, names: playerNames, matchSeed, hostNow: Date.now(),
     holes: [], activeThemes: ACTIVE_THEMES, holeCount: HOLE_COUNT, difficulty: DIFFICULTY,
     hostSkins: equippedSkins,
-    remoteSkins: _fullSkins });
+    remoteSkins: _fullSkins, remoteCos: Object.assign({}, window._remoteCos || {}, { 0: COS.equipped() }) });
   });
 
   // Include host's own skin so all clients can show it correctly
@@ -885,6 +1082,7 @@ function hostStartGame() {
 function joinGame() {
   AudioEngine.init();
   var code = (document.getElementById("mp-input").value.trim()).toLowerCase();
+  window._joinedCode = code;
   if (!code) return;
   document.getElementById("join-status").textContent = "Connecting…";
   if (typeof Peer === "undefined") {
@@ -892,6 +1090,26 @@ function joinGame() {
   }
   _destroyPeer(function() {
     conns.fill(null); hostGameStarted = false;
+    // 1) Host open in another tab of this browser? Talk through the browser itself.
+    var lb = _busLocal();
+    if (!lb) { _joinNet(code); return; }
+    document.getElementById("join-status").textContent = "Looking for the host…";
+    _hubJoin(lb, code, 0.8, function(rc) {
+      if (!rc) { _joinNet(code); return; }
+      conns[0] = rc; setupConnForPlayer(rc, 0);
+      _greetHost(rc);
+    });
+  });
+}
+function _greetHost(conn) {
+  document.getElementById("join-status").textContent = conn.viaRelay ? "Connected (via relay)! Waiting for host…" : "Connected! Waiting for host…";
+  var _un = document.getElementById("username-input");
+  conn.send(JSON.stringify({ t: "my_name", name: (_un && _un.value.trim()) || "Player 2", cos: COS.equipped(),
+    playerSkin: (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default" }));
+}
+// 2) Direct WebRTC link, 3) internet relay when the direct link fails
+function _joinNet(code) {
+  {
     var _p2;
     try { _p2 = new Peer(PEER_CONFIG); peer = _p2; }
     catch (e) { document.getElementById("join-status").textContent = "Error: " + e.message; return; }
@@ -905,16 +1123,28 @@ function joinGame() {
       if (!c) { document.getElementById("join-status").textContent = "Error: connect() failed"; return; }
       conns[0] = c;
       setupConnForPlayer(c, 0);
-      c.on("open", function() {
-        document.getElementById("join-status").textContent = "Connected! Waiting for host…";
-        var _un = document.getElementById("username-input");
-        c.send(JSON.stringify({ t: "my_name", name: (_un && _un.value.trim()) || "Player 2",
-          playerSkin: (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default" }));
+      var js = document.getElementById("join-status"), fellBack = false, greet = _greetHost;
+      var fallback = function() {
+        if (fellBack || c.open || everOpen) return;
+        fellBack = true;
+        if (conns[0] === c) conns[0] = null;
+        try { c.close(); } catch (e) {}
+        js.textContent = "Direct link blocked — connecting through the relay…";
+        _relayJoin(code, function(rc, why) {
+          if (!rc) { js.textContent = _relayFailMsg(why); return; }
+          conns[0] = rc;
+          setupConnForPlayer(rc, 0);
+          greet(rc);
+        });
+      };
+      _watchIce(c, function(st) {
+        if (st === "checking") js.textContent = "Found the host, linking devices…";
+        else if (st === "failed" || st === "disconnected") fallback();
       });
-      setTimeout(function() {
-        if (c.open) return;
-        document.getElementById("join-status").textContent = "Timed out — check code and retry";
-      }, 15000);
+      var everOpen = false;
+      c.on("open", function() { everOpen = true; if (!fellBack) greet(c); });
+      c.on("close", function() { if (!everOpen && !fellBack) fallback(); });
+      setTimeout(fallback, 7000);   // direct link still not up → don't keep the player waiting
     });
-  });
+  }
 }

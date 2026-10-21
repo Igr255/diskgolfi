@@ -47,12 +47,15 @@ function setWeather(wType) {
       rainy:  "Heavy disc · less lift",
       foggy:  "Short preview · slight drag",
       stormy: "Gale force! Heavy + gusts",
-      hot:    "Thermal lift · disc floats",
+      hot:    "Heat haze · extra lift",
       snow:   "Very heavy · low glide",
     };
     eff.textContent = effects[wType] || "";
   }
 
+  // Sky tint, clouds, fog, sun dimming, rain/snow and lightning are handled by graphics.js
+  if (typeof AudioEngine !== "undefined") AudioEngine.setWeather(currentWeather);
+  if (typeof GFX !== "undefined" && GFX.ready) { GFX.setWeather(currentWeather); return; }
   if (scene && scene.fog) scene.fog.density = w.fogDensity;
 
   if (skyMat) {

@@ -26,6 +26,7 @@ var aimAngle     = 0;
 var baseAim      = 0;
 var throwPower   = 0;
 var dragging     = false;
+var _throwStart  = null;   // where the current throw was released (for throw distance)
 var ds = { x: 0, y: 0 }, dn = { x: 0, y: 0 };
 console.log("[DiskGolfi] game.js executing...");
 var cameraMode  = "tp";   // "tp" | "fp" | "spec" — TP is default
@@ -39,7 +40,7 @@ function toggleCameraMode() {
   var modes = ["fp","tp"];
   cameraMode = modes[(modes.indexOf(cameraMode) + 1) % modes.length];
   var btn = document.getElementById("cam-mode-btn");
-  if (btn) btn.textContent = cameraMode === "fp" ? "👁 FP" : "🎥 TP";
+  if (btn) { btn.classList.toggle("fp", cameraMode === "fp"); btn.title = cameraMode === "fp" ? "Third-person view (C)" : "First-person view (C)"; }
   if (localAvatarMesh) localAvatarMesh.visible = (cameraMode === "tp");
   if (discMesh)   discMesh.visible   = (cameraMode === "tp");
   if (fpHandMesh) fpHandMesh.visible = (cameraMode === "fp" && (phase === "AIMING" || phase === "LANDED"));
@@ -56,55 +57,28 @@ var _punchCooldown = 0;
 var _punchImmunity = 0;   // immunity timer for local player (anti-spam)
 
 function _doPunch() {
-  var PUNCH_RANGE = 5.0, bestIdx = -1, bestDist = PUNCH_RANGE;
+  var PUNCH_RANGE = 2.6, bestIdx = -1, bestDist = PUNCH_RANGE;
   remotePlayers.forEach(function(rp, i) {
-    if (!rp || !rp.avatarMesh) return;
+    if (!rp || !rp.avatarMesh || !rp.body) return;
     if (rp.punchImmunity && rp.punchImmunity > 0) return;  // immune, skip
-    var d = Math.hypot(discPos.x - rp.discPos.x, discPos.z - rp.discPos.z);
-    if (d < bestDist) { bestDist = d; bestIdx = i; }
+    var d = Math.hypot(PL.pos.x - rp.body.x, PL.pos.z - rp.body.z);
+    if (d < bestDist && Math.abs(PL.pos.y - rp.body.y) < 1.8) { bestDist = d; bestIdx = i; }
   });
-
   _punchSwingEffect();
   if (typeof _screenShake !== "undefined") { _screenShake = 0.18; _screenShakeT = 0.22; }
-
   if (bestIdx < 0) return;  // swing and a miss
-
   var rp = remotePlayers[bestIdx];
-  var pdx = rp.discPos.x - discPos.x, pdz = rp.discPos.z - discPos.z;
-  var pl  = Math.hypot(pdx, pdz) || 1;
-
-  // Impulse scales with puncher speed + low-grav bonus
-  var mySpeed   = Math.hypot(_playerVelX || 0, _playerVelZ || 0);
-  var gravBonus = (typeof activePowerups !== "undefined" && activePowerups.lowgrav &&
-    activePowerups.lowgrav.until > Date.now()) ? 1.8 : 1.0;
-  var impulse = (14.0 + mySpeed * 1.4) * gravBonus;  // strong arcade punch
-  var dirX = pdx / pl, dirZ = pdz / pl;
-
-  rp.flying        = true;
-  rp.punchStagger  = 1.1;
-  rp.punchImmunity = 1.3;
-  rp.punchKnockDir = { x: dirX, z: dirZ };
-  rp.discVel.set(dirX * impulse, 5.0 * gravBonus, dirZ * impulse);
-  if (rp.discMesh) rp.discMesh.visible = true;
-  // Play launched anim on the remote player mesh we see locally
-  if (rp.avatarMesh && typeof switchAvatarAnim === "function") {
-    switchAvatarAnim(rp.avatarMesh, "jump");
-  }
-
-  _spawnBonkText(rp.discPos.clone());
+  var pdx = rp.body.x - PL.pos.x, pdz = rp.body.z - PL.pos.z, pl = Math.hypot(pdx, pdz) || 1;
+  var gravBonus = (typeof activePowerups !== "undefined" && activePowerups.lowgrav && activePowerups.lowgrav.until > Date.now()) ? 1.6 : 1.0;
+  var impulse = (9 + Math.hypot(PL.vel.x, PL.vel.z) * 0.6) * gravBonus, dirX = pdx / pl, dirZ = pdz / pl;
+  rp.punchStagger = 1.1; rp.punchImmunity = 1.3;
+  if (rp.avatarMesh && typeof switchAvatarAnim === "function") switchAvatarAnim(rp.avatarMesh, "jump");
+  _spawnBonkText(rp.body.clone().add(new THREE.Vector3(0, 2, 0)));
+  AudioEngine.sfx("bonk");
   if (typeof _screenShake !== "undefined") { _screenShake = 0.42; _screenShakeT = 0.5; }
-
   if (mpMode && typeof sendToAll === "function") {
-    sendToAll({
-      t:       "punch_launch",
-      from:    myIdx,
-      target:  bestIdx,
-      px: rp.discPos.x, py: rp.discPos.y, pz: rp.discPos.z,
-      vx: dirX * impulse, vy: 5.0 * gravBonus, vz: dirZ * impulse,
-      dx: dirX, dz: dirZ,
-      impulse: impulse,
-      stagger:  1.1,
-    });
+    sendToAll({ t: "punch_launch", from: myIdx, target: bestIdx, px: rp.body.x, py: rp.body.y, pz: rp.body.z,
+      vx: dirX * impulse, vy: 5.0 * gravBonus, vz: dirZ * impulse, dx: dirX, dz: dirZ, impulse: impulse, stagger: 1.1 });
   }
 }
 
@@ -124,7 +98,7 @@ function _punchSwingEffect() {
 
 // ── BONK popup text in 3D world (DOM overlay) ────────────────────────────
 var _bonkWords = ["BONK!", "WHAM!", "POW!", "OOF!", "SMACK!"];
-function _spawnBonkText(worldPos) {
+function _spawnBonkText(worldPos, word) {
   // Project world → screen
   if (typeof camera === "undefined" || !camera) return;
   var v = worldPos.clone();
@@ -135,11 +109,9 @@ function _spawnBonkText(worldPos) {
 
   var el = document.createElement("div");
   el.className = "bonk-popup";
-  el.textContent = _bonkWords[Math.floor(Math.random() * _bonkWords.length)];
+  el.textContent = word || _bonkWords[Math.floor(Math.random() * _bonkWords.length)];
   el.style.cssText = "position:fixed;left:" + sx + "px;top:" + sy + "px;" +
     "transform:translate(-50%,-50%) rotate(" + (Math.random()*30-15) + "deg) scale(0);" +
-    "font-family:'Permanent Marker',cursive;font-size:32px;color:#ff3300;" +
-    "text-shadow:2px 2px 0 #000,-1px -1px 0 #000,3px 3px 8px rgba(0,0,0,.6);" +
     "pointer-events:none;z-index:200;transition:transform 0.12s cubic-bezier(.3,-0.4,.7,1.4),opacity 0.35s;";
   document.body.appendChild(el);
 
@@ -154,7 +126,7 @@ function _spawnBonkText(worldPos) {
   });
 
   // Particle burst
-  if (typeof spawnParticleBurst === "function") {
+  if (!word && typeof spawnParticleBurst === "function") {
     spawnParticleBurst(worldPos, new THREE.Color(0xff3300), 16);
   }
 }
@@ -180,37 +152,13 @@ function _tickPunchTimers(dt) {
 function _applyPunchToLocalPlayer(vx, vy, vz, px, py, pz, stagger) {
   if (_punchImmunity > 0) return;
   stagger = stagger || 1.1;
-
-  // ── PUNCH moves the PLAYER, not the disc ────────────────────────────
-  // In AIMING/LANDED: discPos IS the player position.
-  // We keep phase=AIMING and apply knockback directly to discPos each frame
-  // via _punchKnockVelX/Z — player slides/stumbles, never launches as a disc.
-  if (typeof discPos !== "undefined") {
-    discPos.x = px; discPos.z = pz;
-    if (typeof terrainY === "function" && typeof HOLES !== "undefined" && HOLES[holeIdx]) {
-      discPos.y = terrainY(px, pz, HOLES[holeIdx], holeIdx) + 0.3;
-    } else {
-      discPos.y = py;
-    }
-  }
-
-  // Apply horizontal knockback velocity — will be consumed in the movement loop
-  _punchKnockVelX = vx * 0.22;   // scale down: we're moving the player, not a disc
-  _punchKnockVelZ = vz * 0.22;
-  _punchKnockTimer = stagger;    // seconds of knockback slide + stagger
   _punchImmunity = stagger + 0.2;
-
-  // Don't change phase — player stays AIMING/LANDED so they can't throw while stumbling
-
-  // Play jump animation on local avatar
-  if (typeof localAvatarMesh !== "undefined" && localAvatarMesh && typeof switchAvatarAnim === "function") {
-    switchAvatarAnim(localAvatarMesh, "jump");
-  }
-
+  // A bonk knocks you off your lie: the disc stays put, you stumble away and walk back
+  if (phase === "AIMING") startWalking(false);
+  if (phase === "WALKING") { var l = Math.hypot(vx, vz) || 1; PL.knock(vx / l, vz / l, Math.min(14, l), vy || 5); }
   if (typeof _screenShake !== "undefined") { _screenShake = 0.60; _screenShakeT = 0.65; }
-  if (typeof _spawnBonkText === "function" && typeof discPos !== "undefined") {
-    _spawnBonkText(discPos.clone());
-  }
+  AudioEngine.sfx("bonk");
+  if (typeof _spawnBonkText === "function") _spawnBonkText(PL.pos.clone().add(new THREE.Vector3(0, 2, 0)));
   var _fl = document.createElement("div");
   _fl.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9998;" +
     "background:radial-gradient(ellipse at center,transparent 35%,rgba(255,0,0,.6) 100%);" +
@@ -265,7 +213,7 @@ function fpThrowEnd(e) {
   });
 })();
 
-var keys = { ArrowLeft:false, ArrowRight:false, w:false,a:false,s:false,d:false,q:false,e:false,r:false,W:false,A:false,S:false,D:false,Q:false,E:false,R:false," ":false,Shift:false };
+var keys = { ArrowLeft:false, ArrowRight:false, ArrowUp:false, ArrowDown:false, w:false,a:false,s:false,d:false,q:false,e:false,r:false,W:false,A:false,S:false,D:false,Q:false,E:false,R:false," ":false,Shift:false };
 var freeCamYaw   = 0;
 var freeCamPitch = -0.25;
 var _freeCamDrag = false, _freeCamLX = 0, _freeCamLY = 0;
@@ -299,48 +247,24 @@ var stepBackCooldown  = 0;
 var STEP_BACK_COOLDOWN = 8;
 
 // ── THREE.JS SETUP ────────────────────────────────────────────────────────────
-var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 var scene  = new THREE.Scene();
-scene.fog  = new THREE.FogExp2(0x111122, 0.012);
+scene.fog  = new THREE.FogExp2(0x111122, 0.006);
 
-var camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 800);
+var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 11, 20);
 
-// Lighting
-var ambLight = new THREE.AmbientLight(0xffffff, 0.55);
-scene.add(ambLight);
-var sunLight = new THREE.DirectionalLight(0xfff5e0, 1.1);
-sunLight.position.set(40, 80, 30);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
-sunLight.shadow.camera.near = 1;
-sunLight.shadow.camera.far  = 300;
-sunLight.shadow.camera.left = sunLight.shadow.camera.bottom = -100;
-sunLight.shadow.camera.right = sunLight.shadow.camera.top   =  100;
-scene.add(sunLight);
-var hemiLight = new THREE.HemisphereLight(0x8899ff, 0x445533, 0.35);
-scene.add(hemiLight);
-
-// Sky dome — used by applyThemeVisuals() in terrain.js
-var skyMat = new THREE.ShaderMaterial({
-  side: THREE.BackSide,
-  uniforms: {
-    c1: { value: new THREE.Color(0x1a053a) },
-    c2: { value: new THREE.Color(0x000000) }
-  },
-  vertexShader:   "varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}",
-  fragmentShader: "uniform vec3 c1;uniform vec3 c2;varying vec3 vP;void main(){float t=clamp(vP.y/280.,0.,1.);gl_FragColor=vec4(mix(c1,c2,t*t),1.);}"
-});
-var skyGeo  = new THREE.SphereGeometry(480, 18, 10);
-skyGeo.scale(-1, 1, 1);
-var skyMesh = new THREE.Mesh(skyGeo, skyMat);
-scene.add(skyMesh);
+// Sky, sun, hemisphere fill, environment map, water, post-processing: graphics.js
+GFX.init(renderer, scene, camera);
+var sunLight  = GFX.sun;
+var hemiLight = GFX.hemi;
+var ambLight  = null;
+var skyMat    = null;   // legacy hook (weather.js) — the sky is driven by GFX presets now
+(function() { var qs = document.getElementById("quality-sel"); if (qs) qs.value = GFX.qualityPref || "auto"; })();
 
 var courseGrp = new THREE.Group();
 scene.add(courseGrp);
@@ -437,26 +361,12 @@ window.addEventListener("keydown", function(e) {
 });
 
 // ── BACKGROUND IMAGE ─────────────────────────────────────────────────────────
+// The 3D scene now has a real per-theme sky (graphics.js). BACKGROUND_IMAGE is
+// only used behind the main menu.
 (function() {
   if (typeof BACKGROUND_IMAGE === "undefined" || !BACKGROUND_IMAGE) return;
-  // Apply as body CSS background — visible through transparent renderer clear.
-  document.body.style.backgroundImage = "url('" + BACKGROUND_IMAGE + "')";
-  document.body.style.backgroundSize = "cover";
-  document.body.style.backgroundPosition = "center";
-  document.body.style.backgroundRepeat = "no-repeat";
-  document.body.style.backgroundAttachment = "fixed";
-  renderer.setClearColor(0x000000, 0);
-
-  // Also use as scene far background for camera frustum fill.
-  if (typeof THREE !== "undefined" && scene) {
-    var _bgLoader = new THREE.TextureLoader();
-    _bgLoader.load(
-      BACKGROUND_IMAGE,
-      function(tex) { scene.background = tex; },
-      undefined,
-      function() { /* keep CSS fallback only */ }
-    );
-  }
+  var m = document.getElementById("menu");
+  if (m) m.style.setProperty("--menu-bg", "url('" + BACKGROUND_IMAGE + "')");
 })();
 
 var obstacles   = [];
@@ -510,7 +420,7 @@ function _makeEntity(root, visual, collider, animator, updateFn) {
 
 function _createPlatformEntity(mv, hole) {
   var waterY = hole.water || -1.5;
-  var surfY = waterY + 1.75 + (mv.elev || 0);
+  var surfY = islandSurfaceY(hole, mv.elev || 0);
   var root = new THREE.Group();
   root.position.set(mv.currentX || mv.baseX, 0, mv.currentZ || mv.baseZ);
   root.userData.entityType = 'platformRoot';
@@ -529,74 +439,21 @@ function _createPlatformEntity(mv, hole) {
   root.add(playersStandingRoot);
   root.add(discsStandingRoot);
 
+  // Glowing hazard ring marks platforms that move
   var rim = new THREE.Mesh(
-    new THREE.TorusGeometry(mv.r, 0.16, 6, 16),
-    new THREE.MeshBasicMaterial({color: 0xffdd00})
+    new THREE.TorusGeometry(mv.r + 0.05, 0.05, 6, 64),
+    new THREE.MeshBasicMaterial({color: 0xffd23a})
   );
   rim.rotation.x = Math.PI / 2;
-  rim.position.set(0, surfY, 0);
+  rim.position.set(0, surfY + 0.03, 0);
   visualRoot.add(rim);
 
-  var tc2 = (typeof themeColors !== 'undefined' && themeColors[hole.theme]) || {island:0x448844};
-  var islCol = new THREE.Color(tc2.island || 0x448844);
-  var proc = new THREE.Group();
-  var mDepth = Math.max(2.5, (mv.elev || 0) + 3);
-  var ft = new THREE.Mesh(new THREE.CylinderGeometry(mv.r, mv.r * 0.88, 0.55, 12), new THREE.MeshLambertMaterial({color:islCol}));
-  ft.position.y = surfY - 0.275;
-  ft.castShadow = true;
-  proc.add(ft);
-  var fs = new THREE.Mesh(new THREE.CylinderGeometry(mv.r * 0.88, mv.r * 0.6, mDepth, 12), new THREE.MeshLambertMaterial({color: islCol.clone().lerp(new THREE.Color(0x222222), 0.45)}));
-  fs.position.y = surfY - 0.275 - mDepth * 0.5 - 0.275;
-  proc.add(fs);
-  visualRoot.add(proc);
-
-  var _islandKey = hole && hole.islandModelKey ? hole.islandModelKey : 'island';
-  if (typeof loadModel === 'function' && typeof MODEL_OVERRIDES !== 'undefined' && MODEL_OVERRIDES[_islandKey]) {
-    var ISL_HW = 0.4465, ISL_TY = 0.745;
-    loadModel(_islandKey, function(glbClone) {
-      if (!glbClone) return;
-      visualRoot.remove(proc);
-      glbClone.updateMatrixWorld(true);
-      var _bb = new THREE.Box3().setFromObject(glbClone);
-      var _sz = new THREE.Vector3(); _bb.getSize(_sz);
-      var _hw = Math.max(_sz.x, _sz.z) * 0.5;
-      if (_hw < 0.001) _hw = ISL_HW;
-      var _topY = _bb.max.y;
-      var _ratio = _estimateIslandTopRadiusRatio(glbClone);
-      mv.walkR = (mv.r || 6) * _ratio;
-      var sc = mv.r / _hw;
-      var posY = surfY - sc * _topY;
-      var islandModelRoot = new THREE.Group();
-      islandModelRoot.scale.setScalar(sc);
-      islandModelRoot.position.y = posY;
-      islandModelRoot.rotation.y = Math.random() * Math.PI * 2;
-      glbClone.traverse(function(c){ if(c.isMesh){ c.castShadow = true; c.receiveShadow = true; } });
-      islandModelRoot.add(glbClone);
-      visualRoot.add(islandModelRoot);
-    });
-  }
-  // Grass patches are children of platform visual root, so they move with the platform root.
-  if (typeof loadModel === 'function' && typeof MODEL_OVERRIDES !== 'undefined' && MODEL_OVERRIDES['grass_patch']) {
-    var _gCount = Math.max(6, Math.min(14, Math.floor((mv.r || 6) * 1.05)));
-    for (var gi = 0; gi < _gCount; gi++) {
-      var ga = srng() * Math.PI * 2;
-      var gd = srng() * Math.max(0.6, (mv.r || 6) * 0.55);
-      var gx = Math.cos(ga) * gd;
-      var gz = Math.sin(ga) * gd;
-      (function(_gx, _gz, _gy) {
-        loadModel('grass_patch', function(grassClone) {
-          if (!grassClone) return;
-          var gp = new THREE.Group();
-          gp.position.set(_gx, _gy, _gz);
-          gp.rotation.y = srng() * Math.PI * 2;
-          gp.scale.setScalar(0.6 + srng() * 0.6);
-          grassClone.traverse(function(c){ if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-          gp.add(grassClone);
-          visualRoot.add(gp);
-        });
-      })(gx, gz, surfY + 0.05);
-    }
-  }
+  var _P = GFX.themePreset(hole.theme);
+  var island = GFX.buildIsland({ x: 0, z: 0, r: mv.r, surfY: surfY, waterY: waterY, theme: hole.theme,
+    type: "moving", floating: !!(_P.water && _P.water.kind === "void"), seed: Math.round(mv.baseX * 7 + mv.baseZ * 3) });
+  visualRoot.add(island);
+  mv.walkR = mv.r;
+  mv.foamR = island.userData.waterlineR;
 
   var entity = _makeEntity(root, visualRoot, colliderRoot, null, function(){});
   entity.obstaclesRoot = obstaclesRoot;
@@ -631,6 +488,10 @@ function _findSupportPlatform(x, z, hole) {
 }
 
 var matchSeed   = Math.floor(Math.random() * 1000000000);
+// Shared match clock: in multiplayer every client uses the host's wall clock, so
+// moving platforms and timed hazards (socks, geysers, feet, lasers…) line up.
+var _clockOff = 0;
+function netTime() { return (typeof mpMode !== "undefined" && mpMode) ? (Date.now() + _clockOff - 1.7e12) / 1000 : T; }
 
 // ── VILOV EXPLOSION PUSH ──────────────────────────────────────────────────────
 function vilovExplosionPush() {
@@ -648,126 +509,174 @@ function vilovExplosionPush() {
   });
 }
 
+// Soft additive light shaft above the basket so it can be spotted from anywhere
+function _buildBeacon(x, y, z, night) {
+  if (!GFX._texCache.beacon) {
+    var c = GFX._canvas(64), g = c.getContext("2d");
+    var gr = g.createLinearGradient(0, 0, 0, 64);
+    gr.addColorStop(0, "rgba(255,255,255,0)"); gr.addColorStop(0.7, "rgba(255,255,255,0.55)"); gr.addColorStop(1, "rgba(255,255,255,1)");
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    GFX._texCache.beacon = GFX._tex(c); GFX._texCache.beacon.wrapS = GFX._texCache.beacon.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  var mat = new THREE.MeshBasicMaterial({ color: 0xffc860, map: GFX._texCache.beacon, transparent: true, opacity: night ? 0.45 : 0.22,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  var m = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.55, 16, 20, 1, true), mat);
+  m.position.set(x, y + 8 + BASKET_DIM.height * 0.5, z);
+  m.userData.isBeacon = true;
+  m.renderOrder = 4;
+  return m;
+}
+
+// ── CAMERA OCCLUDER FADING ───────────────────────────────────────────────────
+// Obstacles between the camera and the player (or the disc in flight) fade out.
+// Materials are cloned per obstacle only while faded (GLB clones share materials).
+function _updateOccluders(dt) {
+  var tgt = (phase === "FLYING") ? discPos : (localAvatarMesh && localAvatarMesh.visible ? localAvatarMesh.position : discPos);
+  var cam = camera.position, active = cameraMode === "tp" && introT <= 0;
+  var ax = cam.x, ay = cam.y, az = cam.z, bx = tgt.x, by = tgt.y + 1.0, bz = tgt.z;
+  var abx = bx - ax, aby = by - ay, abz = bz - az, len2 = abx * abx + aby * aby + abz * abz || 1;
+  obstacles.forEach(function(o) {
+    if (!o.mesh || o.noFade) return;
+    var blocks = false;
+    if (active) {
+      var base = o.worldY !== undefined ? o.worldY : (o.startY || 0), hh = o.h || 2;
+      var ox = o.x, oy = base + hh * 0.5, oz = o.z;
+      var t = ((ox - ax) * abx + (oy - ay) * aby + (oz - az) * abz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      var px = ax + abx * t, py = ay + aby * t, pz = az + abz * t;
+      var dh = Math.hypot(ox - px, oz - pz), up = py - base;
+      blocks = t > 0.02 && t < 0.96 && dh < (o.r || 1) + 0.9 && up < hh + 0.6 && up > -0.5;
+    }
+    var want = blocks ? ((o.h || 2) > 8 ? 0.1 : 0.22) : 1;
+    o._fade = (o._fade === undefined ? 1 : o._fade);
+    o._fade += (want - o._fade) * Math.min(1, dt * 7);
+    _applyObstacleFade(o, o._fade);
+  });
+}
+function _applyObstacleFade(o, a) {
+  if (a > 0.97) {
+    if (o._fadeMats) {
+      o.mesh.traverse(function(m) { if (m.isMesh && m.userData._origMat) { m.material = m.userData._origMat; delete m.userData._origMat; } });
+      o._fadeMats.forEach(function(c) { c.dispose(); });
+      o._fadeMats = null;
+    }
+    return;
+  }
+  if (!o._fadeMats) {
+    o._fadeMats = [];
+    o.mesh.traverse(function(m) {
+      if (!m.isMesh || m.userData._origMat) return;
+      m.userData._origMat = m.material;
+      var arr = Array.isArray(m.material);
+      var mats = (arr ? m.material : [m.material]).map(function(x) {
+        var c = x.clone(); c.transparent = true; c.depthWrite = false; c.userData._fadeBase = x.opacity; o._fadeMats.push(c); return c;
+      });
+      m.material = arr ? mats : mats[0];
+    });
+  }
+  o._fadeMats.forEach(function(c) { c.opacity = c.userData._fadeBase * a; });
+}
+
+// ── HOLE INTRO FLYOVER ───────────────────────────────────────────────────────
+var INTRO_LEN = 3.6, introT = 0, introCurve = null;
+function _startIntro(h) {
+  var C = h.course, pts = [new THREE.Vector3(h.bx, C.basket.y, h.bz)];
+  for (var i = C.route.length - 2; i >= 1; i--) pts.push(new THREE.Vector3(C.route[i].x, C.route[i].y, C.route[i].z));
+  var nx = C.route[1] || { x: h.bx, z: h.bz }, dx = C.tee.x - nx.x, dz = C.tee.z - nx.z, dl = Math.hypot(dx, dz) || 1;
+  pts.push(new THREE.Vector3(C.tee.x, C.tee.y, C.tee.z));
+  pts.push(new THREE.Vector3(C.tee.x + dx / dl * 9, C.tee.y + 1, C.tee.z + dz / dl * 9));
+  // drop points that are too close together (a CatmullRom with duplicate points breaks)
+  pts = pts.filter(function(p, k) { return k === 0 || p.distanceTo(pts[k - 1]) > 0.5; });
+  introCurve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+  introT = INTRO_LEN;
+  var ban = document.getElementById("hole-banner");
+  if (ban) {
+    var nm = (typeof MAP_DISPLAY_NAMES !== "undefined" && MAP_DISPLAY_NAMES[h.theme]) || h.theme;
+    ban.innerHTML = "<div class='hb-hole'>Hole " + h.n + "</div><div class='hb-meta'>Par " + h.par + " &nbsp;·&nbsp; " + (h.routeLen || 0) + " m &nbsp;·&nbsp; " + _themeName(h.theme) + "</div><div class='hb-skip'>Tap or press any key to skip</div>";
+    ban.classList.add("on");
+  }
+}
+function skipIntro() {
+  introT = 0;
+  var ban = document.getElementById("hole-banner");
+  if (ban) ban.classList.remove("on");
+}
+
 // ── LOAD HOLE ────────────────────────────────────────────────────────────────
 function loadHole(idx) {
   holeIdx = idx;
+  _menuBackdrop = false;
   if (!basketWP)     basketWP     = new THREE.Vector3();
   if (!lastValidPos) lastValidPos = new THREE.Vector3();
+  // Free GPU memory from the previous hole (geometry, materials, textures)
+  var _oldCourse = courseGrp.children.slice();
   while (courseGrp.children.length) courseGrp.remove(courseGrp.children[0]);
+  _oldCourse.forEach(function(o) { GFX.disposeTree(o); });
+  if (typeof _glbMixers !== "undefined") _glbMixers.length = 0;
+  GFX.waterMat = null;
 
   seedRNG(matchSeed + idx * 7331);
   HOLES[idx] = generateHole(idx + 1);
   const h = HOLES[idx];
 
   applyThemeVisuals(h.theme);
-  AudioEngine.playTheme(h.theme);
+  AudioEngine.playTheme(h.theme, (matchSeed + idx * 7919) >>> 0);
 
   seedRNG(matchSeed + idx * 9999);
-  h.islandModelKey = "island";
-
-  var _terrainGrp = buildTerrain(h, idx);
-  courseGrp.add(_terrainGrp);
-  courseGrp.add(buildInstancedGrass(h, idx));
-  courseGrp.add(buildWater(h));
-
-  // Build moving islands as unified platform entities (single root transform)
-  platformEntities = [];
-  if (h.movingIslands && h.movingIslands.length > 0) {
-    h.movingIslands.forEach(function(mv) {
-      var platformEntity = _createPlatformEntity(mv, h);
-      platformEntities.push(platformEntity);
-      courseGrp.add(platformEntity.root);
-    });
+  // ── Build the course for this theme (islands, highlands, city, club, interior, blocks, moon, castle) ──
+  h.mods = LV.pickMods(LV.ARCH[h.theme] || "islands", idx, h.theme);
+  if (DIFFICULTY === "easy") h.mods = h.mods.slice(0, Math.max(0, h.mods.length - 1));
+  if (DIFFICULTY === "chaos" && idx >= 1 && h.mods.length < 3) { var _xm = LV.pickMods(LV.ARCH[h.theme] || "islands", 12, h.theme); _xm.forEach(function(m) { if (h.mods.indexOf(m) < 0 && h.mods.length < 3) h.mods.push(m); }); }
+  var _built = LV.build(h, idx), C = _built.course;
+  C.onCrumble = function(i) { if (mpMode && i >= 0) sendToAll({ t: "crumble", h: idx, i: i }); };
+  courseGrp.add(C.group);
+  var _wk = (GFX.themePreset(h.theme).water || {}).kind;
+  if (C.hazard.type === "water" || C.hazard.type === "lava" || (C.hazard.type === "void" && _wk === "grid")) {
+    var _wm = GFX.buildWater(h); courseGrp.add(_wm); C.waterMesh = _wm;
   }
+  if (C.backdrop) courseGrp.add(buildBackdrop(h, idx, C));
+  else if (h.theme === "minecraft" || h.theme === "moon") courseGrp.add(GFX.buildHorizon(h));
+  // Tee pad + tee sign
+  var _tpad = buildTeePad(C.tee.yaw, C.tee.y); _tpad.position.set(C.tee.x, 0, C.tee.z); courseGrp.add(_tpad);
+  if (!C.ceiling) { var _tsign = buildTeeSign(h, C.tee.yaw, C.tee.y); _tsign.position.x += C.tee.x; _tsign.position.z += C.tee.z; courseGrp.add(_tsign); }
+  C.group.userData.batchShadows = true;
+  GFX.batchStatic(C.group);
 
-  var by = h.water + 1.2 + (h.basketElev || 0);
-  var basket = buildBasket();
+  platformEntities = [];
+  var by = C.basket.y;
+  var basket = buildBasket(h.n);
   basket.position.set(h.bx, by, h.bz);
   courseGrp.add(basket);
-  basketWP.set(h.bx, by + 1.75, h.bz);
-  // Basket beacon — point light + translucent column so players can find it from FP
-  var _bcLight = new THREE.PointLight(0xffcc44, 1.6, 35);
-  _bcLight.position.set(h.bx, by + 4, h.bz);
+  currentBasket = basket;
+  basketBase.set(h.bx, by, h.bz);
+  basketWP.set(h.bx, by + BASKET_DIM.centerY, h.bz);
+  // Basket beacon — soft light shaft visible from anywhere on the course
+  var _night = GFX.themePreset(h.theme).sun[1] < 1.5;
+  var _bcLight = new THREE.PointLight(0xffc860, _night ? 1.8 : 0.6, 14, 2);
+  _bcLight.position.set(h.bx, by + 2.6, h.bz);
+  _bcLight.userData.priority = 10;
   courseGrp.add(_bcLight);
-  var _bcMat = new THREE.MeshBasicMaterial({color:0xffcc44,transparent:true,opacity:0.15,side:THREE.DoubleSide});
-  var _bcMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.12,1.2,7,8,1,true), _bcMat);
-  _bcMesh.position.set(h.bx, by + 3.5, h.bz);
-  courseGrp.add(_bcMesh);
+  if (!C.ceiling) courseGrp.add(_buildBeacon(h.bx, by, h.bz, _night));
 
-  obstacles = [];
-  let spawnPoints = [...h.waypoints, { x: 0, z: 0, r: 6 }, { x: h.bx, z: h.bz, r: 8 }];
-  let numObs = 10 + idx * 3;
-
-  for (let i = 0; i < numObs; i++) {
-    let sp    = spawnPoints[Math.floor(srng() * spawnPoints.length)];
-    let angle = srng() * Math.PI * 2;
-    let dist  = srng() * sp.r;
-    let tx = sp.x + Math.cos(angle) * dist;
-    let tz = sp.z + Math.sin(angle) * dist;
-
-    if (Math.hypot(tx, tz) < 4) continue;
-    const distToBasket  = Math.hypot(tx - h.bx, tz - h.bz);
-    if (distToBasket < 6) continue;
-    const angle2basket  = Math.atan2(h.bz, h.bx);
-    const angleToObs    = Math.atan2(tz - h.bz, tx - h.bx);
-    const angDiff = Math.abs(((angleToObs - angle2basket + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-    if (distToBasket < 12 && angDiff < 0.6) continue;
-
-    var objData = (typeof getThemeObstacle === "function") ? getThemeObstacle(h.theme) : getRandomThemeObj(h.theme);
-    if (objData.r > 0) {
-      var ty2 = terrainY(tx, tz, h, idx);
-      if (h.terrainMode === "connected") {
-        if (h.theme === "moon"        && ty2 < -1) continue;
-        if (h.theme === "grandcanyon" && ty2 < -3) continue;
-        if (h.theme === "office"      && ty2 < 0)  continue;
-      }
-      var obsOnMv = _findSupportPlatform(tx, tz, h);
-      const spd2 = srng() * 2 + 1, ph = srng() * 10;
-      if (objData.type === "car") objData.mesh.rotation.y = 0;
-
-      var localStartX = tx;
-      var localStartZ = tz;
-      if (obsOnMv && obsOnMv.entity && obsOnMv.entity.obstaclesRoot) {
-        localStartX = tx - (obsOnMv.currentX || obsOnMv.baseX);
-        localStartZ = tz - (obsOnMv.currentZ || obsOnMv.baseZ);
-        objData.mesh.position.set(localStartX, ty2, localStartZ);
-        obsOnMv.entity.obstaclesRoot.add(objData.mesh);
-      } else {
-        objData.mesh.position.set(tx, ty2, tz);
-        courseGrp.add(objData.mesh);
-      }
-
-      var obs = { x: tx, z: tz, startX: tx, startZ: tz, startY: ty2,
-        localStartX: localStartX, localStartZ: localStartZ,
-        r: objData.r, h: objData.h, mesh: objData.mesh, type: objData.type, speed: spd2, phase: ph,
-        movingIsland: obsOnMv || null };
-      obstacles.push(obs);
-      _refreshObstacleWorldPosition(obs);
-    }
-  }
+  // Living obstacles (critters, traffic, socks, feet, lasers …)
+  obstacles = ENT.spawnAll(h, _built.spawns, idx);
 
   initTrajDots();
   initTrail();
   spawnPowerups(h, idx);
 
-  // ── Sync obstacle layout to all clients (host only) ──
-  if (mpMode && myIdx === 0) {
-    var _obsData = obstacles.map(function(o) {
-      return { x: o.x, z: o.z, startX: o.startX, startZ: o.startZ,
-               r: o.r, h: o.h, type: o.type, speed: o.speed, phase: o.phase };
-    });
-    sendToAll({ t: "obstacle_layout", holeIdx: idx, obstacles: _obsData });
-  }
-
+  GFX.fogBoost = h.mods.indexOf("fog") >= 0 ? 3.2 : 1;
   const weathers = ["clear","clear","clear","windy","rainy","foggy","hot","stormy","snow"];
   var _pickedWeather = weathers[Math.floor(Math.random() * weathers.length)];
   setWeather(_pickedWeather);
   if (mpMode && myIdx === 0) sendToAll({ t: "weather_sync", weather: _pickedWeather });
 
-  // Place disc exactly on island visual surface
-  // terrainYIsland returns waterY+1.75+elev at island centre (top of cylinder)
-  var sy = (h.water || -1.5) + 1.75 + (h.teeElev || 0) + 0.15;
-  discPos.set(0, sy, 0);
+  // Start on the tee pad
+  var sy = C.tee.y + 0.06;
+  discPos.set(C.tee.x, sy, C.tee.z);
+  discLie = discPos.clone();
+  _aimSince = T;
+  PL.reset(C.tee.x, C.tee.y, C.tee.z, C.tee.yaw);
   discVel.set(0, 0, 0);
   discSpin = 0;
 
@@ -788,12 +697,11 @@ function loadHole(idx) {
     var g  = new THREE.Group();
     var d2 = DISCS[selectedDisc] || DISCS.driver;
     var col = d2.color || 0x888888;
-    var armMat = new THREE.MeshLambertMaterial({color:0xf4c28c});
-    var arm  = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.055,0.35,8), armMat);
+    var armMat = new THREE.MeshStandardMaterial({color:0xe8b48a, roughness:0.7});
+    var arm  = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.055,0.35,10), armMat);
     arm.rotation.x = Math.PI/2; arm.position.z = -0.17; g.add(arm);
-    var discMat2 = new THREE.MeshStandardMaterial({color:col,roughness:0.3,metalness:0.3});
-    var disc2 = new THREE.Mesh(new THREE.CylinderGeometry(0.27,0.25,0.05,20), discMat2);
-    disc2.rotation.x = 0.25; g.add(disc2);
+    var disc2 = buildDisc(selectedDisc);
+    disc2.scale.setScalar(0.42); disc2.rotation.x = 0.25; g.add(disc2);
     g.frustumCulled = false;
     g.traverse(function(c){if(c.isMesh){c.frustumCulled=false;c.renderOrder=2;}});
     fpHandMesh = g;
@@ -822,15 +730,15 @@ function loadHole(idx) {
       if (i === myIdx) continue;
       var _rpCol = PLAYER_COLORS[i % PLAYER_COLORS.length];
       // Start remote player at tee surface, offset slightly so they don't stack
-      var _teeOffX = (i - myIdx) * 1.2;
-      var _teeY = terrainY(_teeOffX, 0, h, idx);
+      var _teeOffX = C.tee.x + (i - myIdx) * 1.2;
+      var _teeY = terrainY(_teeOffX, C.tee.z, h, idx);
       const rp = {
-        discPos: new THREE.Vector3(_teeOffX, _teeY + 0.3, 0),
+        discPos: new THREE.Vector3(_teeOffX, _teeY + 0.3, C.tee.z),
         discVel: new THREE.Vector3(), spin: 0, flying: false, discMesh: null,
         avatarMesh: null, nameLabel: null,
         discType: PLAYER_DISC_TYPES[i] || "midrange",
         color: _rpCol, name: playerNames[i] || ("Player "+(i+1)), aimAngle: 0,
-        targetX: _teeOffX, targetZ: 0,  // initialize so lerp starts correctly
+        targetX: _teeOffX, targetZ: C.tee.z, targetY: _teeY,
         velMag: 0,
       };
       rp.discMesh = buildDisc(rp.discType, 0.72);
@@ -848,7 +756,7 @@ function loadHole(idx) {
     }
   }
 
-  baseAim      = Math.atan2(h.bx, -h.bz);
+  baseAim      = autoAimAngle();
   aimAngle     = baseAim;
   throwPower   = 0;
   phase        = "AIMING";
@@ -857,8 +765,8 @@ function loadHole(idx) {
   (function(){
     var _sa=baseAim,_cd=new THREE.Vector3(Math.sin(_sa),0,-Math.cos(_sa));
     var _dist=Math.min(15,Math.hypot(h.bx-discPos.x,h.bz-discPos.z)*0.5+7);
-    var _sy=(h.water||-1.5)+1.75+(h.teeElev||0)+0.06;
-    if(typeof _camPos!=="undefined") _camPos.set(discPos.x-_cd.x*_dist,_sy+8,discPos.z+_cd.z*_dist);
+    var _sy=C.tee.y+0.06;
+    if(typeof _camPos!=="undefined") _camPos.set(discPos.x-_cd.x*_dist,_sy+8,discPos.z-_cd.z*_dist);
     if(typeof _camLook!=="undefined") _camLook.set(discPos.x+_cd.x*6,_sy+1.5,discPos.z+_cd.z*6);
   })();
   playerDone.fill(false);
@@ -868,9 +776,9 @@ function loadHole(idx) {
   setSpectating(false);
 
   const fnb = document.getElementById("force-next-btn");
-  if (fnb) fnb.style.display = mpMode && myIdx === 0 ? "block" : "none";
+  if (fnb) fnb.style.display = mpMode && myIdx === 0 ? "grid" : "none";
   const gub = document.getElementById("giveup-btn");
-  if (gub) { gub.style.display = "block"; gub.style.pointerEvents = "all"; }
+  if (gub) { gub.style.display = ""; }
 
   hideMsg();
   document.getElementById("pwr-bar").style.display = "none";
@@ -884,15 +792,76 @@ function loadHole(idx) {
   if (_hTxt) {
     var _thName = (h.theme||"").replace(/_/g," ");
     _thName = _thName.charAt(0).toUpperCase() + _thName.slice(1);
-    _hTxt.textContent = h.templateLabel
-      ? _thName + " · " + h.templateLabel
-      : _thName;
+    _hTxt.textContent = (h.templateLabel ? _thName + " · " + h.templateLabel : _thName) +
+      (h.mods && h.mods.length ? "  " + h.mods.map(function(m) { return (LV.MODS[m] || {}).icon || ""; }).join(" ") : "");
+    _hTxt.title = (h.mods || []).map(function(m) { var M = LV.MODS[m]; return M ? M.label + " — " + M.desc : ""; }).join("\n");
   }
+
+  document.body.classList.toggle("mp", !!mpMode);
+
+  // ── Graphics finishing pass ──
+  GFX.upgradeMaterials(courseGrp);
+  GFX.capLights(courseGrp, C.route);
+  GFX.setFoamIslands((h._foamStatic || []).slice());
+  GFX._focus.set(C.tee.x, sy, C.tee.z);
+  _setWalkHud(false);
+  releaseBank = 0; updateReleaseUI();
+  _throwStart = null;
+  if (typeof resetMinimap === "function") resetMinimap();
+  _startIntro(h);
+}
+
+// ── AUTO AIM ─────────────────────────────────────────────────────────────────
+// Points at the next island along the route (not straight at the basket, which
+// on doglegs means aiming over open water).
+function autoAimAngle() {
+  var h = HOLES[holeIdx]; if (!h || !h.course) return 0;
+  var C = h.course, R = C.route;
+  // Within reach of the basket: aim at it. Otherwise aim at the next route point
+  // that is ahead of the disc and in line of sight.
+  if (Math.hypot(h.bx - discPos.x, h.bz - discPos.z) < 32) return Math.atan2(h.bx - discPos.x, -(h.bz - discPos.z));
+  var pd = LV.polyDist(R, discPos.x, discPos.z), tot = 0;
+  for (var i = 1; i < R.length; i++) tot += Math.hypot(R[i].x - R[i - 1].x, R[i].z - R[i - 1].z);
+  var best = null;
+  for (var k = 40; k >= 8; k -= 4) {
+    var p = LV.pointAt(R, Math.min(1, pd.t + k / (tot || 1)));
+    if (_lineClear(C, discPos.x, discPos.y + 1, discPos.z, p.x, C.heightAt(p.x, p.z) + 1.5, p.z)) { best = p; break; }
+  }
+  if (!best) best = LV.pointAt(R, Math.min(1, pd.t + 10 / (tot || 1)));
+  return Math.atan2(best.x - discPos.x, -(best.z - discPos.z));
+}
+function _lineClear(C, ax, ay, az, bx, by, bz) {
+  var n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5);
+  for (var i = 1; i < n; i++) {
+    var t = i / n, y = ay + (by - ay) * t;
+    if (C.heightAt(ax + (bx - ax) * t, az + (bz - az) * t) > y) return false;
+    if (C.ceiling && y > C.ceiling) return false;
+  }
+  return true;
 }
 
 // ── SCORING ───────────────────────────────────────────────────────────────────
+function scoreLabel(throws, par) {
+  if (throws === 1) return { t: "Ace!", c: "#ffe27a" };
+  var d = throws - par;
+  if (d <= -3) return { t: "Albatross!", c: "#ffd0f4" };
+  if (d === -2) return { t: "Eagle!", c: "#ffe27a" };
+  if (d === -1) return { t: "Birdie!", c: "#b4ffbf" };
+  if (d === 0)  return { t: "Par", c: "#ffffff" };
+  if (d === 1)  return { t: "Bogey", c: "#ffe2d6" };
+  if (d === 2)  return { t: "Double bogey", c: "#ffd2c4" };
+  return { t: "+" + d, c: "#ffc4b6" };
+}
+function _fmtPar(v) { v = Math.round(v); return v === 0 ? "E" : v > 0 ? "+" + v : "" + v; }
+
+// Persistent player stats (localStorage)
+var dgStats = { holes: 0, aces: 0, birdies: 0, longest: 0, best: {} };
+(function() { try { var s = localStorage.getItem("dg_stats"); if (s) Object.assign(dgStats, JSON.parse(s)); } catch (e) {} })();
+function saveStats() { try { localStorage.setItem("dg_stats", JSON.stringify(dgStats)); } catch (e) {} }
+
 function scored() {
   phase = "SCORED";
+  _setWalkHud(false);
   discPos.set(basketWP.x, basketWP.y - 0.2, basketWP.z);
   discVel.set(0, 0, 0); discSpin = 0;
   discMesh.position.copy(discPos); discMesh.rotation.z = 0;
@@ -907,6 +876,10 @@ function scored() {
     totalVsPar += diff;
   }
   myHoleDone = true;
+  dgStats.holes++;
+  if (throwCount === 1) dgStats.aces++;
+  if (diff < 0) dgStats.birdies++;
+  saveStats();
   // Basket impact + skin unlocks
   if (typeof handleImpact === "function") handleImpact("basket", basketWP.clone(), discVel.clone());
   if (typeof unlockedSkins !== "undefined") {
@@ -924,6 +897,7 @@ function scored() {
   } else if (selectedDisc === "vilov") {
     spawnExplosion(basketWP.clone());
   }
+  if (throwCount !== 1) AudioEngine.stinger(diff <= -2 ? "eagle" : diff === -1 ? "birdie" : diff === 0 ? "par" : diff === 1 ? "bogey" : "worse");
   pushThrowHistory();
 
   if (mpMode) {
@@ -939,20 +913,26 @@ function scored() {
     }
   } else {
     setSpectating(false);
-    showMsg(labels[idx2], "", "Next Hole \u2192");
+    var _sl = scoreLabel(throwCount, par);
+    showMsg(_sl.t, throwCount + (throwCount === 1 ? " throw" : " throws") + " \u00b7 Par " + par + " \u00b7 Total " + _fmtPar(totalVsPar),
+      holeIdx + 1 >= HOLE_COUNT ? "Scorecard \u2192" : "Next Hole \u2192");
+    var _mb = document.getElementById("msg-big"); if (_mb) _mb.style.color = _sl.c;
   }
   updateScoreUI();
 }
 
+var discLie = null;          // where the disc rests between throws
 function landed() {
   if (!HOLES[holeIdx]) { phase = "AIMING"; return; }
   phase = "LANDED";
   const h = HOLES[holeIdx], m = Math.hypot(discPos.x - h.bx, discPos.z - h.bz);
+  discLie = discPos.clone();
+  ENT.landT = T;
   const dd = document.getElementById("dist");
-  dd.textContent = m.toFixed(1) + " m from basket";
+  var _td = _throwStart ? Math.hypot(discPos.x - _throwStart.x, discPos.z - _throwStart.z) : 0;
+  if (_td > dgStats.longest) { dgStats.longest = Math.round(_td); saveStats(); }
+  dd.innerHTML = (_td > 0.5 ? "<span class='accent'>" + _td.toFixed(1) + " m throw</span> &nbsp;·&nbsp; " : "") + m.toFixed(1) + " m to basket";
   dd.style.opacity = "1";
-  baseAim  = Math.atan2(h.bx - discPos.x, -(h.bz - discPos.z));
-  aimAngle = baseAim;
   if (mpMode) sendToAll({ t: "land", from: myIdx, px: discPos.x, py: discPos.y, pz: discPos.z, throws: throwCount });
   setTimeout(() => {
     if (phase !== "LANDED") return;
@@ -979,8 +959,79 @@ function landed() {
       }
       return;
     }
-    phase = "AIMING";
-  }, 2400);
+    // Close enough to just pick it up?
+    if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) < 1.4) pickUpDisc();
+    else startWalking(true);
+  }, 1100);
+}
+
+// ── WALK → PICK UP ───────────────────────────────────────────────────────────
+// After a throw you walk to the disc. Moving while aiming puts the disc down
+// so you can scout ahead; come back to it to pick it up again.
+var _pickupArmed = true;
+var _aimSince = 0;          // T when the player last got the disc in hand
+function startWalking(afterThrow) {
+  if (!HOLES[holeIdx] || spectatingOpp) return;
+  phase = "WALKING";
+  _pickupArmed = !!afterThrow;
+  dragging = false; document.body.classList.remove("aiming");
+  document.getElementById("pwr-bar").style.display = "none";
+  trajDots.forEach(function(d) { d.visible = false; });
+  if (trajLandRing) trajLandRing.visible = false;
+  if (!afterThrow) { var g = terrainY(discPos.x, discPos.z, HOLES[holeIdx], holeIdx); discPos.y = g + 0.06; }
+  PL.camYaw = afterThrow ? Math.atan2(discPos.x - PL.pos.x, -(discPos.z - PL.pos.z)) : aimAngle;
+  _setWalkHud(true);
+}
+function pickUpDisc() {
+  var h = HOLES[holeIdx]; if (!h) return;
+  var C = h.course, g = C.heightAt(discPos.x, discPos.z);
+  phase = "AIMING"; _aimSince = T;
+  PL.pos.set(discPos.x, g, discPos.z); PL.vel.set(0, 0, 0); PL.onGround = true;
+  discPos.y = g + 0.06; discLie = discPos.clone();
+  baseAim = autoAimAngle(); aimAngle = baseAim;
+  PL._setAnim("idle");
+  AudioEngine.sfx("pickup");
+  _setWalkHud(false);
+  if (mpMode) sendToAll({ t: "land", from: myIdx, px: discPos.x, py: discPos.y, pz: discPos.z, throws: throwCount });
+}
+// Unplayable lie (stuck on a roof, inside a hedge…): +1 stroke, back to the previous lie
+function takeRelief() {
+  if (phase !== "WALKING" && phase !== "LANDED") return;
+  var h = HOLES[holeIdx]; if (!h) return;
+  throwCount++;
+  var prev = throwHistory.length ? throwHistory[throwHistory.length - 1].pos.clone() : new THREE.Vector3(h.course.tee.x, h.course.tee.y, h.course.tee.z);
+  if (ENT.carrying) { ENT.carrying.state = null; ENT.carrying = null; }
+  discPos.copy(prev);
+  pickUpDisc();
+  _flashPrompt("Relief taken · +1 stroke");
+  updateScoreUI();
+}
+// HUD for the walking phase: distance to the disc, relief button, mobile stick + jump
+function _setWalkHud(on) {
+  document.body.classList.toggle("walking", !!on);
+  var wh = document.getElementById("walk-hud"); if (wh) wh.classList.toggle("on", !!on);
+  if (discMarker) discMarker.visible = !!on;
+}
+var _promptT = null;
+function _flashPrompt(txt) {
+  var el = document.getElementById("prompt-toast"); if (!el) return;
+  el.textContent = txt; el.classList.add("on");
+  clearTimeout(_promptT); _promptT = setTimeout(function() { el.classList.remove("on"); }, 2200);
+}
+function _modChips(h) {
+  if (!h.mods || !h.mods.length) return "";
+  return "<div class='hb-mods'>" + h.mods.map(function(m) { var M = LV.MODS[m]; return M ? "<span class='hb-mod' title='" + M.desc + "'>" + M.icon + " " + M.label + "</span>" : ""; }).join("") + "</div>";
+}
+// Pulsing ring + light column marking the resting disc
+var discMarker = null;
+function _buildDiscMarker() {
+  var g = new THREE.Group();
+  var ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; g.add(ring);
+  var col = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.35, 6, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x8adcff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, map: GFX._texCache.beacon || null }));
+  col.position.y = 3; g.add(col);
+  g.userData.ring = ring; g.visible = false;
+  return g;
 }
 
 function outOfBounds(isTimeout) {
@@ -993,40 +1044,30 @@ function outOfBounds(isTimeout) {
       : (h2.theme==="moon"||h2.theme==="grandcanyon") ? "crater" : "water";
     handleImpact(_hazType, discPos.clone(), discVel.clone());
   }
-  var hazardMsg = isTimeout ? "LOST IN THE VOID!"
-    : h2.theme === "moon"        ? "CRATER! -1 Stroke."
-    : h2.theme === "grandcanyon" ? "FELL IN CANYON! -1 Stroke."
-    : h2.theme === "office"      ? "FELL OFF MAP! -1 Stroke."
-    : "WATER HAZARD! -1 Stroke.";
-  showMsg(hazardMsg, "Resetting to last safe spot\u2026", null);
+  var _hz = h2.course ? h2.course.hazardAt(discPos.x, discPos.z).type : "water";
+  var hazardMsg = isTimeout ? "Lost in the void"
+    : _hz === "lava" ? "Into the lava"
+    : _hz === "void" ? (h2.theme === "moon" ? "Down the crater" : "Lost in the void")
+    : _hz === "none" ? "Out of bounds"
+    : h2.theme === "poolrooms" ? "Into the pool"
+    : "Water hazard";
+  if (ENT.carrying) { ENT.carrying.state = null; ENT.carrying = null; }
+  _setWalkHud(false);
+  showMsg(hazardMsg, "+1 stroke \u00b7 back to your last lie", null);
+  if (!isTimeout) AudioEngine.stinger("water");
   updateScoreUI();
   setTimeout(() => {
     if (phase !== "SCORED") return;
     hideMsg();
-    // Respawn at last THROW position — where player stood before the bad throw
+    // Back to the lie the disc was thrown from (where the player is standing)
     var _rp = (typeof throwHistory !== "undefined" && throwHistory.length > 0)
       ? throwHistory[throwHistory.length - 1].pos.clone()
-      : lastValidPos.clone();
-    if (HOLES[holeIdx]) {
-      var _rGnd = terrainY(_rp.x, _rp.z, HOLES[holeIdx], holeIdx);
-      var _rWat = HOLES[holeIdx].water || -1.5;
-      if (_rGnd <= _rWat + 0.3) {
-        _rp.set(0, _rWat + 1.75 + 0.06, 0);  // fallback: tee island
-      } else {
-        _rp.y = _rGnd + 0.06;
-      }
-    }
+      : (discLie ? discLie.clone() : lastValidPos.clone());
     discPos.copy(_rp); discVel.set(0, 0, 0); discSpin = 0;
     discMesh.visible = true;
-    discMesh.position.copy(discPos);
-    phase = "LANDED";
-    const m = Math.hypot(discPos.x - HOLES[holeIdx].bx, discPos.z - HOLES[holeIdx].bz);
-    document.getElementById("dist").textContent  = m.toFixed(1) + " m";
-    document.getElementById("dist").style.opacity = "1";
-    baseAim  = Math.atan2(HOLES[holeIdx].bx - discPos.x, -(HOLES[holeIdx].bz - discPos.z));
-    aimAngle = baseAim;
+    pickUpDisc();
+    PL._setAnim("idle");
     if (mpMode) sendToAll({ t: "land", from: myIdx, px: discPos.x, py: discPos.y, pz: discPos.z, throws: throwCount });
-    setTimeout(() => { document.getElementById("dist").style.opacity = "0"; phase = "AIMING"; }, 1800);
   }, 2000);
 }
 
@@ -1054,26 +1095,116 @@ function setDifficulty(v) {
 function advanceHole() {
   var next = holeIdx + 1;
   if (next >= HOLE_COUNT) {
-    // Game over — show final scorecard
-    showMsg("GAME OVER!",
-      "You played " + HOLE_COUNT + " holes! Total vs par: " +
-      (totalVsPar >= 0 ? "+" + totalVsPar : totalVsPar), null);
-    setTimeout(function() {
-      hideMsg();
-      document.getElementById("menu").style.display = "flex";
-      document.getElementById("ui").style.display   = "none";
-      phase = "MENU";
-      _SP_FORCED_THEME = null;
-      AudioEngine._gameActive = false;
-      AudioEngine.stopAll();
-      AudioEngine.playMenu();
-    }, 4000);
+    hideMsg();
+    showFinalScorecard();
     return;
   }
   holeIdx = next;
   seedRNG(matchSeed + next * 7331);
   HOLES[next] = generateHole(next + 1);
   loadHole(next);
+}
+
+// ── FINAL SCORECARD ──────────────────────────────────────────────────────────
+function showFinalScorecard() {
+  phase = "SCORED";
+  var key = HOLE_COUNT + "_" + DIFFICULTY;
+  var prevBest = dgStats.best[key];
+  var isBest = prevBest === undefined || totalVsPar < prevBest;
+  if (isBest) { dgStats.best[key] = totalVsPar; saveStats(); }
+  var el = document.getElementById("final-card");
+  if (!el) return;
+  var rows = [[], [], []], totPar = 0, totThr = 0;
+  for (var i = 0; i < HOLE_COUNT; i++) {
+    var par = HOLES[i] ? HOLES[i].par : 3, sc = holeScores[i];
+    totPar += par; totThr += (sc || 0);
+    var cls = sc === null || sc === undefined ? "" : sc === 1 ? "ace" : sc < par - 1 ? "eagle" : sc < par ? "birdie" : sc === par ? "par" : sc === par + 1 ? "bogey" : "dbl";
+    rows[0].push("<th>" + (i + 1) + "</th>");
+    rows[1].push("<td>" + par + "</td>");
+    rows[2].push("<td><span class='sc " + cls + "'>" + (sc == null ? "–" : sc) + "</span></td>");
+  }
+  el.innerHTML = "<div class='sheet'>" +
+    "<div class='fc-title'>Round complete</div>" +
+    "<div class='fc-total " + (totalVsPar < 0 ? "under" : totalVsPar > 0 ? "over" : "even") + "'>" + _fmtPar(totalVsPar) + "</div>" +
+    "<div class='fc-sub'>" + totThr + " throws · par " + totPar + " · " + HOLE_COUNT + " holes · " + DIFFICULTY + (isBest ? " · <b>New personal best!</b>" : " · best " + _fmtPar(prevBest)) + "</div>" +
+    "<div class='fc-scroll'><table class='fc-table'><tr><th>Hole</th>" + rows[0].join("") + "</tr><tr><td>Par</td>" + rows[1].join("") + "</tr><tr><td>You</td>" + rows[2].join("") + "</tr></table></div>" +
+    (typeof PF !== "undefined" ? PF.roundEnd(totalVsPar) : "") +
+    "<div class='fc-stats'>Lifetime · " + dgStats.holes + " holes · " + dgStats.aces + " aces · " + dgStats.birdies + " birdies · longest throw " + dgStats.longest + " m</div>" +
+    "<div class='fc-actions'><button class='btn primary big' onclick='_fcAgain()'>Play again</button><button class='btn big' onclick='_fcMenu()'>Main menu</button></div>" +
+    "</div>";
+  el.style.display = "flex";
+  AudioEngine.stinger("round");
+  if (typeof celebrateAce === "function" && isBest) celebrateAce(basketWP.clone());
+}
+function _fcHide() { var el = document.getElementById("final-card"); if (el) el.style.display = "none"; }
+function _fcAgain() { _fcHide(); startSPWithTheme(_SP_FORCED_THEME); }
+function _fcMenu() {
+  _fcHide();
+  hideMsg();
+  document.getElementById("menu").style.display = "flex";
+  document.getElementById("ui").style.display   = "none";
+  document.body.classList.remove("fp-active");
+  phase = "MENU";
+  _SP_FORCED_THEME = null;
+  if (typeof menuView === "function") menuView("home");
+  showMenuBackdrop();
+  AudioEngine._gameActive = false;
+  AudioEngine.stopAll();
+  AudioEngine.playMenu();
+}
+// In-game "home" button
+function quitToMenu() {
+  if (phase === "MENU") return;
+  if (!window.confirm(mpMode ? "Leave this multiplayer game?" : "Quit this round and return to the menu?")) return;
+  if (mpMode && typeof leaveLobby === "function") { leaveLobby(); }
+  _fcMenu();
+}
+
+// ── MENU BACKDROP ────────────────────────────────────────────────────────────
+// A small calm island scene behind the menu with a slowly orbiting camera.
+var _menuBackdrop = false;
+function showMenuBackdrop() {
+  var old = courseGrp.children.slice();
+  while (courseGrp.children.length) courseGrp.remove(courseGrp.children[0]);
+  old.forEach(function(o) { GFX.disposeTree(o); });
+  if (typeof _glbMixers !== "undefined") _glbMixers.length = 0;
+  [discMesh, localAvatarMesh, fpHandMesh, trailMesh, trajLandRing, discMarker].forEach(function(o) { if (o) o.visible = false; });
+  ENT.clear(); document.body.classList.remove("walking");
+  var _wh = document.getElementById("walk-hud"); if (_wh) _wh.classList.remove("on");
+  (trajDots || []).forEach(function(d) { d.visible = false; });
+  remotePlayers.forEach(function(rp) {
+    if (!rp) return;
+    if (rp.discMesh) scene.remove(rp.discMesh);
+    if (rp.avatarMesh) scene.remove(rp.avatarMesh);
+    if (rp.nameLabel && rp.nameLabel.parentNode) rp.nameLabel.parentNode.removeChild(rp.nameLabel);
+  });
+  var theme = "village", W = -1.5;
+  GFX.setTheme(theme); GFX.setWeather("clear");
+  GFX.waterMat = null;
+  courseGrp.add(GFX.buildWater({ theme: theme, water: W }));
+  var isl = [{ x: 0, z: 0, r: 9, e: 0 }, { x: -27, z: -16, r: 7, e: 1.4 }, { x: 24, z: -30, r: 8, e: 0.6 }, { x: -8, z: -50, r: 6.5, e: 2.2 }, { x: 36, z: 4, r: 6, e: 0.3 }];
+  var foam = [];
+  isl.forEach(function(p, i) {
+    var surf = W + ISLAND_TOP + p.e;
+    var g = GFX.buildIsland({ x: p.x, z: p.z, r: p.r, surfY: surf, waterY: W, theme: theme, type: i === 0 ? "basket" : "normal", seed: 101 + i * 37 });
+    courseGrp.add(g);
+    foam.push({ x: p.x, z: p.z, r: g.userData.waterlineR });
+    if (i > 0) {
+      (function(px, pz, py) {
+        loadModel("tree", function(t) { if (!t || !_menuBackdrop) return; t.position.set(px, py, pz); t.rotation.y = px; courseGrp.add(t); });
+      })(p.x + 1.5, p.z - 1, surf);
+    }
+  });
+  GFX.setFoamIslands(foam);
+  var b = buildBasket(1); b.position.set(0, W + ISLAND_TOP, 0); courseGrp.add(b);
+  currentBasket = b;
+  GFX.upgradeMaterials(courseGrp);
+  _menuBackdrop = true;
+}
+function _menuCamera(t) {
+  var a = t * 0.035 + 0.6;
+  camera.position.set(Math.sin(a) * 44, 11 + Math.sin(t * 0.11) * 1.5, Math.cos(a) * 44 - 16);
+  camera.lookAt(0, 2.2, -16);
 }
 
 // ── DISC LOCKER ───────────────────────────────────────────────────────────────
@@ -1108,15 +1239,15 @@ function _tryDiscCode() {
     if (typeof _buildSkinGrid === "function") _buildSkinGrid();
     return;
   }
-  if (prv) prv.textContent = "❌ Invalid code";
+  if (prv) prv.textContent = "That code didn't work";
 }
 
 function _buildDlTabs() {
   var box = document.getElementById("dl-disc-tabs"); if (!box) return; box.innerHTML = "";
   Object.keys(DISCS).forEach(function(disc) {
     var btn = document.createElement("button");
-    btn.textContent = (DISCS[disc].icon||"") + " " + (DISCS[disc].label||disc);
-    btn.style.cssText = "padding:3px 8px;font-size:11px;font-family:'Bebas Neue',cursive;cursor:pointer;border-radius:4px;border:1px solid rgba(185,103,255,.4);background:"+(disc===_dlActiveDisc?"rgba(185,103,255,.35)":"transparent")+";color:#fff;letter-spacing:1px;margin:1px";
+    btn.className = "chip" + (disc === _dlActiveDisc ? " on" : "");
+    btn.innerHTML = "<span class='dot' style='background:" + _discCss(disc) + "'></span>" + (DISCS[disc].label || disc);
     btn.onclick = function(){ _dlActiveDisc = disc; _buildDlTabs(); _buildDlGrid(disc); };
     box.appendChild(btn);
   });
@@ -1126,10 +1257,7 @@ function _buildDlGrid(discType) {
   var grid = document.getElementById("dl-skin-grid");
   var prv  = document.getElementById("dl-preview-name");
   if (!grid) return; grid.innerHTML = "";
-  if (typeof DISC_SKINS === "undefined" || !DISC_SKINS._global) {
-    grid.innerHTML = "<div style='color:#ff4444;font-family:monospace;font-size:11px;grid-column:1/-1;padding:8px'>ERROR: DISC_SKINS not loaded</div>";
-    return;
-  }
+  if (typeof DISC_SKINS === "undefined" || !DISC_SKINS._global) return;
   var skins = DISC_SKINS._global.slice();
   if (discType==="vilov"&&DISC_SKINS.vilov) skins=skins.concat(DISC_SKINS.vilov);
   var eqId = (equippedSkins&&equippedSkins[discType])||"classic";
@@ -1139,29 +1267,22 @@ function _buildDlGrid(discType) {
     var rarCol = (RARITY_COLORS&&RARITY_COLORS[skin.rarity])||"#aaa";
     var card = document.createElement("div");
     card.className = "skin-card" + (isEq ? " active" : "") + (locked ? " locked" : "");
-    var _bg  = isEq ? "#5a2000" : "#1e0a00";
-    var _brd = isEq ? "#ffcc00" : (locked ? "#5a2800" : "#8b4000");
-    card.style.cssText = "background:"+_bg+";border:2px solid "+_brd+";padding:8px 6px;text-align:center;cursor:"+(locked?"default":"pointer")+";box-shadow:2px 2px 0 #5a2000;opacity:"+(locked?"0.38":"1")+";";
-    card.title = (skin.desc||"") + (skin.unlock ? " | Unlock: "+skin.unlock : "");
-    var _hex  = skin.color ? "#"+skin.color.toString(16).padStart(6,"0") : null;
-    var swatch = _hex
-      ? "<span style='display:inline-block;width:20px;height:20px;background:"+_hex+";border-radius:50%;border:2px solid rgba(255,255,255,.4);margin-bottom:2px'></span>"
-      : "<span style='font-size:22px;display:block;margin-bottom:3px'>🎨</span>";
-    var extras = "";
-    if (skin.shape||skin.rainbow||skin.holo||skin.giant) extras += "<div style='font-size:7px;color:#ffcc00'>+SHAPE</div>";
-    if (skin.particles) extras += "<div style='font-size:7px;color:#ff8800'>+FX</div>";
+    card.title = (skin.desc||"") + (locked && skin.unlock ? " — Unlock: " + skin.unlock : "");
+    var col = skin.color != null ? "#" + skin.color.toString(16).padStart(6,"0") : _discCss(discType);
+    if (skin.rainbow) col = "conic-gradient(#ff6a6a,#ffd36a,#7bff8a,#6ad8ff,#b46aff,#ff6a6a)";
+    var tags = (skin.shape||skin.giant ? "<span class='tag'>SHAPE</span>" : "") + (skin.particles ? "<span class='tag'>FX</span>" : "");
     card.innerHTML =
-      swatch +
-      "<div style='font-family:\"Bebas Neue\",cursive;font-size:12px;color:#ffd580;letter-spacing:1px'>" + skin.name + "</div>" +
-      "<div style='font-size:8px;color:"+rarCol+";letter-spacing:1px'>" + skin.rarity.toUpperCase() + "</div>" +
-      extras +
-      (locked ? "<div style='font-size:8px;color:#cc8833;margin-top:2px;opacity:.7'>" + (skin.unlock||"") + "</div>" : "");
+      "<span class='orb' style='--c:" + col + "'></span>" +
+      "<div class='skin-name'>" + skin.name + "</div>" +
+      "<span class='rarity' style='color:" + rarCol + "'>" + skin.rarity + "</span>" + tags +
+      "<div class='skin-meta'>" + (locked ? "🔒 " + (skin.unlock||"") : isEq ? "✓ Equipped" : "&nbsp;") + "</div>";
     if (!locked) {
       card.onclick = function() {
         equippedSkins[discType]=skin.id; saveSkins();
-        if(prv) prv.textContent = skin.name+" equipped!";
+        if(prv) prv.textContent = skin.name + " equipped";
         _buildDlGrid(discType);
-        if(typeof discMesh!=="undefined"&&selectedDisc===discType&&typeof buildDisc==="function"&&scene) {
+        if (typeof initGameDiscPicker === "function") initGameDiscPicker();
+        if(typeof discMesh!=="undefined"&&discMesh&&selectedDisc===discType&&typeof buildDisc==="function"&&scene&&phase!=="MENU") {
           scene.remove(discMesh); discMesh=buildDisc(discType);
           discMesh.frustumCulled=false;
           discMesh.traverse(function(c){if(c.isMesh){c.frustumCulled=false;c.renderOrder=1;}});
@@ -1180,29 +1301,24 @@ function _buildDlGrid(discType) {
 var _SP_FORCED_THEME = null;  // null = random, string = lock every SP hole to this theme
 
 function toggleSpMapPicker() {
-  var main = document.getElementById("sp-main-btns");
   var picker = document.getElementById("sp-map-picker");
-  if (!main || !picker) return;
-  var show = picker.style.display === "none" || picker.style.display === "";
-  main.style.display   = show ? "none" : "";
-  picker.style.display = show ? "block" : "none";
-  if (show) _buildSpMapPicker();
+  var show = !picker || picker.style.display === "none";
+  menuView(show ? "play" : "home");
 }
 
+// Course tiles show each theme's own sky colours
 function _buildSpMapPicker() {
   var grid = document.getElementById("sp-map-grid");
   if (!grid || grid.children.length > 0) return;  // already built
-  var names = typeof MAP_DISPLAY_NAMES !== "undefined" ? MAP_DISPLAY_NAMES : {};
-  var cols = typeof themeColors !== "undefined" ? themeColors : {};
   THEMES.forEach(function(th) {
-    var tc = cols[th] || {};
-    var bg = tc.sky1 ? "#" + tc.sky1.toString(16).padStart(6,"0") : "#222233";
+    var P = GFX.themePreset(th), full = (MAP_DISPLAY_NAMES[th] || th);
+    var em = (full.match(/^[^A-Za-z0-9]+/) || [""])[0].trim();
+    var hx = function(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); };
     var tile = document.createElement("button");
-    tile.style.cssText = "background:" + bg + ";color:#fff;border:2px solid rgba(255,255,255,.18);border-radius:5px;padding:6px 4px;font-size:11px;cursor:pointer;text-align:center;line-height:1.2;transition:border-color .15s,transform .1s;font-family:inherit";
-    tile.textContent = names[th] || th;
-    tile.title = th;
-    tile.onmouseenter = function(){ this.style.borderColor="rgba(255,200,80,.9)"; this.style.transform="scale(1.06)"; };
-    tile.onmouseleave = function(){ this.style.borderColor="rgba(255,255,255,.18)"; this.style.transform=""; };
+    tile.className = "tile";
+    tile.style.background = "linear-gradient(180deg," + hx(P.zen) + " 0%," + hx(P.hor) + " 62%," + hx(P.surf.top) + " 63%," + hx(P.surf.edge) + " 100%)";
+    tile.innerHTML = "<span class='em'>" + em + "</span><span class='nm'>" + _themeName(th) + "</span>";
+    tile.title = "Play " + _themeName(th);
     tile.onclick = function(){ startSPWithTheme(th); };
     grid.appendChild(tile);
   });
@@ -1224,8 +1340,7 @@ var MAP_POOLS = {
 function setMapPool(name){
   ACTIVE_THEMES=MAP_POOLS[name]||null;
   var lbl=document.getElementById("pool-label");
-  var pNames={all:"All Maps",spooky:"🌌 Spooky",funny:"😂 Funny",urban:"🏙️ Urban",nature:"🌿 Nature",new:"🎮 New"};
-  if(lbl) lbl.textContent="Pool: "+(pNames[name]||"All Maps");
+  if(lbl) lbl.textContent = ACTIVE_THEMES ? ACTIVE_THEMES.length + " courses in rotation" : "All courses";
 }
 
 function switchMapTab(tab) {
@@ -1259,9 +1374,9 @@ function initMapCheckboxes() {
   if (!box || box.children.length > 0) return;  // already built
   THEMES.forEach(function(th) {
     var label = document.createElement("label");
-    label.style.cssText = "display:flex;align-items:center;gap:4px;padding:2px 4px;cursor:pointer;border-radius:3px;color:#ccc";
+
     var cb = document.createElement("input");
-    cb.type = "checkbox"; cb.value = th; cb.style.accentColor = "#b967ff";
+    cb.type = "checkbox"; cb.value = th; cb.style.accentColor = "#33c3ef";
     cb.checked = !ACTIVE_THEMES || ACTIVE_THEMES.includes(th);
     var span = document.createElement("span");
     span.textContent = MAP_DISPLAY_NAMES[th] || th;
@@ -1307,15 +1422,20 @@ var clock = new THREE.Clock();
 
 // Start menu music when page first loads
 (function initMenuMusicOnLoad() {
-  var started = false;
-  function tryStart() {
-    if (started) return; started = true;
+  // Start the audio engine right away. If the browser allows autoplay the menu
+  // theme fades in immediately; otherwise the very first click / tap / key
+  // press resumes it (browsers require a user gesture before any sound).
+  AudioEngine.init();
+  AudioEngine.playMenu();
+  AudioEngine._syncUI();
+  function kick() {
     AudioEngine.init();
-    if (typeof AudioEngine.playMenu === "function") AudioEngine.playMenu();
+    if (phase === "MENU") AudioEngine.playMenu();
+    if (AudioEngine.ctx && AudioEngine.ctx.state === "running")
+      ["pointerdown", "keydown", "touchend", "click"].forEach(function(ev) { window.removeEventListener(ev, kick, true); });
   }
-  // Start on first user interaction (required by browser autoplay policy)
-  ["click","keydown","touchstart"].forEach(function(ev) {
-    window.addEventListener(ev, tryStart, {once:true, passive:true, capture:true});
+  ["pointerdown", "keydown", "touchend", "click"].forEach(function(ev) {
+    window.addEventListener(ev, kick, { passive: true, capture: true });
   });
 })();
 
@@ -1326,6 +1446,7 @@ function animate() {
 
   // Always update GLB mixers — must happen before any early return
   if (typeof _glbMixers !== "undefined") _glbMixers.forEach(function(m){m.update(dt);});
+  if (typeof COS !== "undefined") COS.tick(T);
 
   // ── Remote player walk animations (render-rate, state-machine) ──────────────
   // Mixers are updated by the _glbMixers.forEach above — do NOT update again here.
@@ -1338,7 +1459,7 @@ function animate() {
       var _rvm  = rp.velMag || 0;
       var _rWas = mesh._wantAnim === "walk";
       var _rwlk = _rvm > 0.1;
-      var _want = (rp.punchStagger > 0) ? "jump" : (_rwlk ? "walk" : "idle");
+      var _want = (rp.punchStagger > 0) ? "jump" : (rp.anim || (_rwlk ? "walk" : "idle"));
       if (mesh._wantAnim !== _want) {
         mesh._wantAnim = _want;
         if (typeof switchAvatarAnim === "function") switchAvatarAnim(mesh, _want);
@@ -1348,114 +1469,37 @@ function animate() {
 
   // While in MENU or before a hole is loaded, just render and return
   if (phase === "MENU" || !HOLES[holeIdx]) {
-    renderer.render(scene, camera);
+    if (_menuBackdrop && phase === "MENU") { _menuCamera(T); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    AudioEngine.updateFlight(false, 0, false);
+    GFX.update(dt, null);
+    GFX.render();
     return;
   }
 
-  if (phase === "AIMING") {
-    var _rs = 1.4 * dt;
+  // Hole intro flyover
+  if (introT > 0) { introT -= dt; if (introT <= 0) skipIntro(); }
 
-    // ── Arrow keys: rotate aim (both modes) ──
+  var _C = HOLES[holeIdx].course;
+  // World simulation: moving / crumbling platforms, rising tide, animated lights, critters
+  if (_C) _C.update(netTime(), dt);
+  ENT.update(dt);
+
+  if (phase === "AIMING" && introT <= 0) {
+    var _rs = 1.4 * dt;
     if (keys.ArrowLeft)  { baseAim += _rs; aimAngle = baseAim; }
     if (keys.ArrowRight) { baseAim -= _rs; aimAngle = baseAim; }
-
-    // ── WASD: move player position in TP mode ──────────────────────────
     if(_punchCooldown>0)_punchCooldown-=dt;
     if(_punchImmunity>0)_punchImmunity-=dt;
     if (typeof _tickPunchTimers === "function") _tickPunchTimers(dt);
     if((keys.r||keys.R)&&_punchCooldown<=0&&cameraMode!=="spec"){
       _punchCooldown=1.2; keys.r=false; keys.R=false; _doPunch();
     }
-
-    if (cameraMode === "tp" && HOLES[holeIdx]) {
-      var _moveSpd = 5.5 * dt;
-      var _fwdX = Math.sin(aimAngle), _fwdZ = -Math.cos(aimAngle);
-      var _rightX = Math.cos(aimAngle), _rightZ = Math.sin(aimAngle);
-      var _savedX = discPos.x, _savedZ = discPos.z;
-      var _moved = false;
-
-      // ── PUNCH KNOCKBACK SLIDE ─────────────────────────────────────────
-      // Applied every frame during _punchKnockTimer, decays with friction.
-      // This moves the PLAYER BODY (discPos), not the disc.
-      if (_punchKnockTimer > 0) {
-        _punchKnockTimer -= dt;
-        var _kFric = Math.pow(0.06, dt);  // fast friction — stumble, not flight
-        _punchKnockVelX *= _kFric;
-        _punchKnockVelZ *= _kFric;
-        discPos.x += _punchKnockVelX;
-        discPos.z += _punchKnockVelZ;
-        _moved = true;
-        // Block player input while staggering
-        // (fall through — WASD keys below are not pressed during knockback)
-      }
-
-      if (keys.w || keys.W) { discPos.x += _fwdX*_moveSpd;   discPos.z += _fwdZ*_moveSpd;   _moved=true; }
-      if (keys.s || keys.S) { discPos.x -= _fwdX*_moveSpd;   discPos.z -= _fwdZ*_moveSpd;   _moved=true; }
-      if (keys.a || keys.A) { discPos.x -= _rightX*_moveSpd; discPos.z -= _rightZ*_moveSpd;  _moved=true; }
-      if (keys.d || keys.D) { discPos.x += _rightX*_moveSpd; discPos.z += _rightZ*_moveSpd;  _moved=true; }
-
-      if (_moved) {
-        var _h   = HOLES[holeIdx];
-        var _wat = _h.water || -1.5;
-        // ON_ISLAND: terrainY returns waterY+1.75+elev when on island surface.
-        var _ON  = _wat + 0.8;
-
-        var _gFull = terrainY(discPos.x, discPos.z, _h, holeIdx);
-        if (_gFull >= _ON) {
-          discPos.y = _gFull + 0.06;
-        } else {
-          // Try axis slides
-          discPos.x = _savedX;
-          var _gZ = terrainY(discPos.x, discPos.z, _h, holeIdx);
-          if (_gZ >= _ON) {
-            discPos.y = _gZ + 0.06;
-          } else {
-            discPos.z = _savedZ;
-            var _gX = terrainY(discPos.x, discPos.z, _h, holeIdx);
-            if (_gX >= _ON) {
-              discPos.y = _gX + 0.06;
-            } else {
-              discPos.x = _savedX; discPos.z = _savedZ;
-              discPos.y = terrainY(_savedX, _savedZ, _h, holeIdx) + 0.06;
-            }
-          }
-        }
-
-        // Grace push-back: clamp to nearest island if still off-surface
-        if (terrainY(discPos.x, discPos.z, _h, holeIdx) < _ON) {
-          var _centres = [
-            {x:0,z:0,r:(_h.teeWalkR || 8)},
-            {x:_h.bx,z:_h.bz,r:(_h.basketWalkR || 8)}
-          ];
-          _h.waypoints.forEach(function(wp){_centres.push({x:wp.x,z:wp.z,r:wp.walkR || wp.r || 7});});
-          if(_h.movingIslands) _h.movingIslands.forEach(function(mv){
-            _centres.push({x:mv.currentX||mv.baseX,z:mv.currentZ||mv.baseZ,r:mv.r||6});
-          });
-          var _bc=null,_bd=Infinity;
-          _centres.forEach(function(c){var d=Math.hypot(discPos.x-c.x,discPos.z-c.z);if(d<_bd){_bd=d;_bc=c;}});
-          if(_bc){
-            var _pd=Math.hypot(discPos.x-_bc.x,discPos.z-_bc.z)||0.001;
-            var _sr=_bc.r-0.3;
-            if(_pd>_sr){discPos.x=_bc.x+(discPos.x-_bc.x)/_pd*_sr;discPos.z=_bc.z+(discPos.z-_bc.z)/_pd*_sr;}
-            discPos.y=terrainY(discPos.x,discPos.z,_h,holeIdx)+0.06;
-          }
-        }
-      }
-
+    // Moving while aiming puts the disc down so you can walk around and scout.
+    // Needs a fresh key press made after you picked the disc up, so holding W
+    // while running onto the disc doesn't immediately drop it again.
+    if (cameraMode !== "spec" && !spectatingOpp && !dragging) {
+      if (PL.anyMoveInput() && _lastMoveKeyDown > _aimSince && !(cameraMode === "fp" && _joyActive)) startWalking(false);
     }
-    if(localAvatarMesh&&localAvatarMesh.userData.glbLoaded&&phase==="AIMING"){
-      // Hysteresis: start walking at vel>0.50, stop at vel<0.18
-      // Prevents rapid idle↔walk flickering at threshold boundary
-      var _curVel  = Math.hypot(_playerVelX, _playerVelZ);
-      var _wasWalk = localAvatarMesh.userData.isMoving || false;
-      var _wlk2    = cameraMode === "tp" && (_wasWalk ? _curVel > 0.18 : _curVel > 0.50);
-      if (_wlk2 !== _wasWalk) {
-        localAvatarMesh.userData.isMoving = _wlk2;
-        if (typeof switchAvatarAnim === "function")
-          switchAvatarAnim(localAvatarMesh, _wlk2 ? "walk" : "idle");
-      }
-    }
-
     if (cameraMode === "fp") {
       if (keys.ArrowUp)   fpPitch = Math.max(-1.1, fpPitch + _rs * 0.45);
       if (keys.ArrowDown) fpPitch = Math.min( 0.45, fpPitch - _rs * 0.45);
@@ -1472,119 +1516,46 @@ function animate() {
       }
     }
   }
-  // Mid-flight disc tilt — A/D
-  if (phase === "FLYING") {
-    var _steerStr = 2.5 * dt;
-    if (keys.a || keys.A) { discVel.x -= Math.cos(Math.atan2(discVel.x, -discVel.z)) * _steerStr; }
-    if (keys.d || keys.D) { discVel.x += Math.cos(Math.atan2(discVel.x, -discVel.z)) * _steerStr; }
+
+  // Escalation warnings
+  if (_C && _C.tide && _C.tide.t > _C.tide.delay && !_C._tideWarned) { _C._tideWarned = true; _flashPrompt(_C.hazard.type === "lava" ? "The lava is rising — hurry!" : "The tide is rising — hurry!"); }
+
+  // ── WALKING: the player runs / jumps to the disc ──
+  if ((phase === "WALKING" || phase === "LANDED") && _C) {
+    // The resting disc rides moving platforms, drops when its platform crumbles
+    if (!ENT.carrying) {
+      var _ds = _C.supportAt(discPos.x, discPos.z);
+      if (_ds.solid && _ds.solid.mover) { discPos.x += _ds.solid.dx || 0; discPos.z += _ds.solid.dz || 0; discPos.y += _ds.solid.dy || 0; }
+      if (discPos.y > _ds.y + 0.2) discPos.y = Math.max(_ds.y + 0.06, discPos.y - 9 * dt);
+      else discPos.y = _ds.y + 0.06;
+      var _dhz = _C.hazardAt(discPos.x, discPos.z);
+      if (discPos.y < _dhz.level + 0.1 && _ds.y < _dhz.level) { outOfBounds(false); }
+    }
+  }
+  if (phase === "LANDED" && _C && throwCount < 12 && PL.anyMoveInput() && _lastMoveKeyDown > (ENT.landT || 0) && !spectatingOpp) {
+    document.getElementById("dist").style.opacity = "0";
+    if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) < 1.4) pickUpDisc(); else startWalking(true);
+  }
+  if (phase === "WALKING" && _C) {
+    if (_punchCooldown > 0) _punchCooldown -= dt;
+    if (typeof _tickPunchTimers === "function") _tickPunchTimers(dt);
+    if ((keys.r || keys.R) && _punchCooldown <= 0 && mpMode) { _punchCooldown = 1.2; keys.r = keys.R = false; _doPunch(); }
+    PL.update(dt);
+    var _dd = Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z);
+    if (_dd > 2.4) _pickupArmed = true;
+    if (_pickupArmed && !ENT.carrying && PL.respawnT <= 0 && _dd < 1.3 && Math.abs(discPos.y - PL.pos.y) < 1.7) pickUpDisc();
+    if (ENT.carrying && Math.hypot(ENT.carrying.x - PL.pos.x, ENT.carrying.z - PL.pos.z) < 2.2) ENT.dropDisc(ENT.carrying, true);
+    var _wd = document.getElementById("walk-dist");
+    if (_wd && (_nameLabelFrame % 6 === 0)) _wd.textContent = _dd < 1.5 ? "Grab it!" : Math.round(_dd) + " m";
   }
 
-  obstacles.forEach((o) => {
-    var _baseX = (o.movingIsland ? (o.localStartX || 0) : o.startX);
-    var _baseZ = (o.movingIsland ? (o.localStartZ || 0) : o.startZ);
-    if (o.type === "tractor") {
-      o.mesh.position.x = _baseX + Math.sin(T * o.speed + o.phase) * 8; o.x = o.mesh.position.x;
-    } else if (o.type === "axe") {
-      o.mesh.position.z = _baseZ + Math.cos(T * o.speed + o.phase) * 6; o.mesh.rotation.y += dt * 5; o.z = o.mesh.position.z;
-    } else if (o.type === "furry") {
-      o.mesh.position.y = o.startY + Math.abs(Math.sin(T * o.speed * 2 + o.phase)) * 4;
-      o.mesh.position.x = _baseX + Math.sin(T * o.speed + o.phase) * 5; o.x = o.mesh.position.x;
-    } else if (o.type === "entity") {
-      o.mesh.position.y = o.startY + Math.sin(T * 2 + o.phase) * 0.5;
-      if (phase === "FLYING") o.mesh.lookAt(discPos.x, o.mesh.position.y, discPos.z);
-    } else if (o.type === "bunny") {
-      o.mesh.position.y = o.startY + Math.abs(Math.sin(T * o.speed * 3 + o.phase)) * 8;
-    } else if (o.type === "foot") {
-      o.mesh.position.y = o.startY + Math.abs(Math.sin(T * o.speed + o.phase)) * 5;
-    } else if (o.type === "car") {
-      const prevZ = o.mesh.position.z;
-      o.mesh.position.z += o.speed * dt * 15;
-      if (o.mesh.position.z > _baseZ + 40) o.mesh.position.z = _baseZ - 40;
-      const dz = o.mesh.position.z - prevZ;
-      if (Math.abs(dz) > 0.001) o.mesh.rotation.y = dz > 0 ? 0 : Math.PI;
-      o.z = o.mesh.position.z;
-    } else if (o.type === "sock") {
-      o.mesh.rotation.z = Math.sin(T * o.speed + o.phase) * 0.25;
-      o.mesh.position.y = o.startY + Math.abs(Math.sin(T * o.speed * 0.5 + o.phase)) * 0.3;
-    } else if (o.type === "laundry") {
-      o.mesh.rotation.z = Math.sin(T * 0.8 + o.phase) * 0.06;
-    } else if (o.type === "pillar") {
-      o.mesh.children.forEach((c) => {
-        if (c.material && c.material.color && c.material.color.r > 0.9)
-          c.material.opacity = 0.6 + Math.abs(Math.sin(T * 8 + o.phase)) * 0.4;
-      });
-    } else if (o.type === "poo") {
-      o.mesh.rotation.z = Math.sin(T * 1.2 + o.phase) * 0.08;
-    } else if (o.type === "screamer") {
-      o.mesh.position.y = o.startY + Math.sin(T * 2.5 + o.phase) * 0.6;
-      o.mesh.rotation.y += dt * 1.8;
-      if (o.mesh.children[0]) o.mesh.children[0].scale.setScalar(1.0 + Math.abs(Math.sin(T * 4 + o.phase)) * 0.12);
-      if (phase === "FLYING") o.mesh.lookAt(discPos.x, o.mesh.position.y, discPos.z);
-    } else if (o.type === "spike") {
-      o.mesh.rotation.y += dt * 3.0;
-      o.mesh.position.y  = o.startY + Math.abs(Math.sin(T * 3 + o.phase)) * 1.5;
-    } else if (o.type === "toilet") {
-      o.mesh.rotation.z = Math.sin(T * 4 + o.phase) * 0.04;
-    } else if (o.type === "tornado") {
-      o.mesh.rotation.y += dt * 4.0;
-      o.mesh.position.x  = _baseX + Math.sin(T * o.speed + o.phase) * 3; o.x = o.mesh.position.x;
-      if (phase === "FLYING") {
-        const td = Math.hypot(discPos.x - o.mesh.position.x, discPos.z - o.z);
-        if (td < 10) {
-          discVel.x += ((o.mesh.position.x - discPos.x) / td) * 0.8 * dt;
-          discVel.z += ((o.z - discPos.z) / td) * 0.8 * dt;
-        }
-      }
-    } else if (o.type === "waterfall") {
-      o.mesh.children.forEach((c) => {
-        if (c.material && c.material.transparent)
-          c.material.opacity = 0.5 + Math.abs(Math.sin(T * 3 + o.phase)) * 0.25;
-      });
-    } else if (o.type === "number") {
-      o.mesh.rotation.y += dt * 0.3;
-    } else if (o.type === "lamp") {
-      o.mesh.children.forEach((c) => {
-        if (c.isLight) c.intensity = 1.0 + Math.sin(T * 12 + o.phase) * 0.15;
-      });
-    } else if (o.type === "dog" || o.type === "woman") {
-      var _isDog = o.type === "dog";
-      // Lazy-init heading — non-zero timer so they don't bolt on spawn
-      if (o._dirAngle === undefined) {
-        o._dirAngle = Math.random() * Math.PI * 2;
-        o._dirTimer = (_isDog ? 1.0 : 1.5) + Math.random() * 2.0;
-      }
-      o._dirTimer -= dt;
-      if (o._dirTimer <= 0) {
-        if (_isDog) {
-          o._dirAngle += (Math.random() - 0.5) * Math.PI * 1.6;  // erratic dog turns
-          o._dirTimer = 0.8 + Math.random() * 1.8;
-        } else {
-          o._dirAngle += (Math.random() - 0.5) * Math.PI * 0.8;  // smooth jog arcs
-          o._dirTimer = 2.0 + Math.random() * 3.0;
-        }
-      }
-      var _spd   = o.speed * (_isDog ? 1.0 : 1.5) * dt;
-      var _newX  = o.mesh.position.x + Math.cos(o._dirAngle) * _spd;
-      var _newZ  = o.mesh.position.z + Math.sin(o._dirAngle) * _spd;
-      // Only step onto solid island surface — bounce at edges
-      var _h     = HOLES[holeIdx];
-      var _wLvl  = _h ? (_h.water || -1.5) : -1.5;
-      var _gnd   = _h ? terrainY(_newX, _newZ, _h, holeIdx) : o.startY;
-      if (_gnd > _wLvl + 0.15) {
-        // Valid ground — accept move and snap Y to surface
-        o.mesh.position.x = _newX;
-        o.mesh.position.z = _newZ;
-        o.mesh.position.y = _gnd;
-      } else {
-        // Island edge — flip direction immediately, reset timer
-        o._dirAngle += Math.PI + (Math.random() - 0.5) * 0.8;
-        o._dirTimer = 0.4 + Math.random() * 0.8;
-      }
-      o.mesh.rotation.y = Math.atan2(Math.cos(o._dirAngle), Math.sin(o._dirAngle));
-      o.x = o.mesh.position.x; o.z = o.mesh.position.z;
-    }
-    _refreshObstacleWorldPosition(o);
-  });
+  // Mid-flight disc tilt — A/D
+  if (phase === "FLYING") {
+    // Nudge the flight left/right, perpendicular to the direction of travel
+    var _steerStr = 2.5 * dt, _hv = Math.hypot(discVel.x, discVel.z) || 1;
+    var _sr = (keys.d || keys.D ? 1 : 0) - (keys.a || keys.A ? 1 : 0);
+    if (_sr) { var _rx = -discVel.z / _hv, _rz = discVel.x / _hv; discVel.x += _rx * _sr * _steerStr; discVel.z += _rz * _sr * _steerStr; }
+  }
 
   // Track last safe position — record the island SURFACE position (not disc position)
   // Update whenever disc is flying LOW over a solid island (close to landing)
@@ -1602,7 +1573,8 @@ function animate() {
     if (phase !== "FLYING") return;
     const dx = discPos.x - o.x, dz = discPos.z - o.z;
     const hd = Math.sqrt(dx * dx + dz * dz);
-    if (hd < o.r + 0.55 && discPos.y < o.h + (o.mesh.position.y || 0) && discPos.y > (o.mesh.position.y || 0) - 0.5) {
+    var _ob = o.worldY !== undefined ? o.worldY : (o.mesh.position.y || 0);
+    if (o.solid !== false && hd < o.r + 0.25 && discPos.y < o.h + _ob && discPos.y > _ob - 0.3) {
       const nx = dx / hd, nz = dz / hd;
       const dot = discVel.x * nx + discVel.z * nz;
       if (dot < 0) {
@@ -1618,39 +1590,12 @@ function animate() {
     }
   });
 
-  // ── OBSTACLE vs PLAYER BODY (AIMING phase) ────────────────────────────────
-  // Moving obstacles (cars etc) can smack the player while they're walking around
-  if (phase === "AIMING" && cameraMode === "tp" && _punchImmunity <= 0) {
-    obstacles.forEach(function(o) {
-      if (!o.speed || o.speed <= 0) return;  // only moving obstacles
-      var _pdx = discPos.x - o.x, _pdz = discPos.z - o.z;
-      var _pd  = Math.sqrt(_pdx*_pdx + _pdz*_pdz);
-      if (_pd < o.r + 0.7) {
-        // Player hit by obstacle — apply knockback like a punch
-        var _impLen = _pd || 0.001;
-        var _nx = _pdx / _impLen, _nz = _pdz / _impLen;
-        var _imp = 8.0 + o.speed * 2;
-        _punchKnockVelX = _nx * _imp;
-        _punchKnockVelZ = _nz * _imp;
-        _punchKnockTimer = 0.6;
-        _punchImmunity   = 1.0;
-        if (typeof switchAvatarAnim === "function" && localAvatarMesh) switchAvatarAnim(localAvatarMesh, "jump");
-        if (typeof _screenShake !== "undefined") { _screenShake = 0.35; _screenShakeT = 0.4; }
-        if (typeof _spawnBonkText === "function") _spawnBonkText(discPos.clone());
-        // Broadcast to others
-        if (mpMode && typeof sendToAll === "function") {
-          sendToAll({ t: "punch_launch", from: -1, target: myIdx,
-            px: discPos.x, py: discPos.y, pz: discPos.z,
-            vx: _nx*_imp, vy: 2.0, vz: _nz*_imp,
-            dx: _nx, dz: _nz, impulse: _imp, stagger: 0.6 });
-        }
-      }
-    });
-  }
-
   stepPhysics(dt);
-  if(_screenShakeT>0){_screenShakeT-=dt;_screenShake*=0.82;if(_screenShakeT<=0)_screenShake=0;}
+  if(_screenShakeT>0){_screenShakeT-=dt;_screenShake*=Math.pow(0.82, dt*60);if(_screenShakeT<=0)_screenShake=0;}
   updateCamera(dt);
+  _updateOccluders(dt);
+  if (typeof updateBasketFX === "function") updateBasketFX(dt);
+  if (trajLandRing && !(phase === "AIMING" && dragging)) trajLandRing.visible = false;
   updateTrail(discPos, phase === "FLYING");
   updateParticles(dt);
   updateRain(dt);
@@ -1682,138 +1627,56 @@ function animate() {
     if (elevHud2) elevHud2.style.display = "none";
   }
 
+  // ── Avatar & disc placement ──
+  if (localAvatarMesh) localAvatarMesh.visible = cameraMode === "tp" && PL.respawnT <= 0;
   if (phase === "AIMING" && HOLES[holeIdx]) {
-    // Legacy stable guardrail from old game.js:
-    // hard-clamp player to nearest island's safe radius.
-    var h = HOLES[holeIdx];
-    var centers = [{ x: 0, z: 0, r: 8 }, { x: h.bx, z: h.bz, r: 8 }];
-    if (h.waypoints) {
-      h.waypoints.forEach(function(wp) {
-        centers.push({ x: wp.x, z: wp.z, r: wp.walkR || wp.r || 7 });
-      });
+    var _gndNow = terrainY(discPos.x, discPos.z, HOLES[holeIdx], holeIdx);
+    // The lie can be on a moving platform: player and disc ride along
+    if (_C) { var _ls = _C.supportAt(discPos.x, discPos.z); if (_ls.solid && _ls.solid.mover) { discPos.x += _ls.solid.dx || 0; discPos.z += _ls.solid.dz || 0; } _gndNow = _C.heightAt(discPos.x, discPos.z); if (_C.touch) _C.touch(discPos.x, discPos.z); }
+    discPos.y = _gndNow + 0.06;
+    PL.pos.set(discPos.x, _gndNow, discPos.z);
+    var _fwX = Math.sin(aimAngle), _fwZ = -Math.cos(aimAngle);
+    PL.yaw = Math.atan2(_fwX, _fwZ);
+    PL.camYaw = aimAngle;
+    // Standing on a crumbling lie that falls away → the disc goes with it
+    var _lhz = _C ? _C.hazardAt(discPos.x, discPos.z) : null;
+    if (_lhz && _gndNow < _lhz.level) { PL.fall(_lhz.type); outOfBounds(false); }
+    PL.applyAvatar(dt);
+    PL._setAnim("idle");
+    if (localAvatarMesh && !localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) localAvatarMesh.children[7].rotation.z = -0.55 - throwPower * 0.7;
+    if (discMesh) {
+      discMesh.visible = cameraMode === "tp";
+      discMesh.scale.setScalar(DISC_SCALE_HAND);
+      var _rgX = Math.cos(aimAngle), _rgZ = Math.sin(aimAngle);
+      discMesh.position.set(discPos.x + _rgX * 0.34 + _fwX * 0.22, _gndNow + 1.0 + throwPower * 0.25, discPos.z + _rgZ * 0.34 + _fwZ * 0.22);
+      discMesh.rotation.set(0, Math.atan2(_fwX, _fwZ), releaseBank * 0.9);
+      (discMesh.userData.spinner || discMesh).rotation.y += 0.6 * dt;
     }
-    if (h.movingIslands) {
-      h.movingIslands.forEach(function(mv) {
-        centers.push({ x: mv.currentX || mv.baseX, z: mv.currentZ || mv.baseZ, r: mv.walkR || mv.r || 6 });
-      });
-    }
-    var closest = null, minDist = Infinity;
-    centers.forEach(function(c) {
-      var d = Math.hypot(discPos.x - c.x, discPos.z - c.z);
-      if (d < minDist) { minDist = d; closest = c; }
-    });
-    if (closest) {
-      var maxSafeRadius = closest.r - 0.5;
-      if (minDist > maxSafeRadius) {
-        var angle = Math.atan2(discPos.z - closest.z, discPos.x - closest.x);
-        discPos.x = closest.x + Math.cos(angle) * maxSafeRadius;
-        discPos.z = closest.z + Math.sin(angle) * maxSafeRadius;
-      }
-    }
-
-    // Track which moving platform currently supports the player/disc.
-    if (phase === "AIMING" || phase === "LANDED") {
-      var _supportNow = _findSupportPlatform(discPos.x, discPos.z, HOLES[holeIdx]);
-      if (_supportNow !== discSupportPlatform) {
-        discSupportPlatform = _supportNow;
-        if (discSupportPlatform && discSupportPlatform.entity && discSupportPlatform.entity.root) {
-          discSupportPlatform.entity.root.worldToLocal(discSupportLocalPos.copy(discPos));
-        }
-      }
-    }
-
-    const _gndNow = terrainY(discPos.x, discPos.z, HOLES[holeIdx], holeIdx);
-    if (discPos.y < _gndNow + 0.3) discPos.y = _gndNow + 0.3;
-
-    // TP: avatar stands at player position, holds disc in hand
-    if (localAvatarMesh) {
-      localAvatarMesh.visible = (cameraMode === "tp");
-      var _fl = (typeof _playerFeetLift === "function") ? _playerFeetLift(myIdx) : 0;
-      localAvatarMesh.position.set(discPos.x, _gndNow + _fl + 0.1, discPos.z);
-      
-      var _safeDt = Math.max(0.0001, dt);
-      var _dvx = (discPos.x - _prevDiscX) / _safeDt;
-      var _dvz = (discPos.z - _prevDiscZ) / _safeDt;
-      
-      _prevDiscX = discPos.x; _prevDiscZ = discPos.z;
-      
-      _dvx = Math.max(-20, Math.min(20, _dvx));
-      _dvz = Math.max(-20, Math.min(20, _dvz));
-      
-      var _vs = Math.min(1, 14*dt);
-      _playerVelX += (_dvx - _playerVelX) * _vs;
-      _playerVelZ += (_dvz - _playerVelZ) * _vs;
-      var _velMag = Math.hypot(_playerVelX, _playerVelZ);
-      
-      if (_velMag > 0.4) {
-        // Fixed math mapping for Three.js coordinates
-        var _tYaw = Math.atan2(_playerVelX, _playerVelZ);
-        var _dYaw = _tYaw - _avatarYaw;
-        
-        while (_dYaw >  Math.PI) _dYaw -= Math.PI * 2;
-        while (_dYaw < -Math.PI) _dYaw += Math.PI * 2;
-        
-        _avatarYaw += _dYaw * Math.min(1, 16*dt);
-      }
-      localAvatarMesh.rotation.y = _avatarYaw;
-
-      // Raise right arm (child[7]) when charging
-      if (!localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) {
-        var _armAngle = -0.55 - throwPower * 0.7;
-        localAvatarMesh.children[7].rotation.z = _armAngle;
-      }
-
-      // In TP: disc is held in right hand
-      // Procedural disc radius=0.54 → shrink to 0.38. GLB disc is already normalized → use 1.0.
-      if (discMesh) {
-        discMesh.visible = true;
-        discMesh.scale.setScalar(discMesh.userData.glbLoaded ? 1.0 : 0.38);
-        var _fwdX  = Math.sin(aimAngle), _fwdZ  = -Math.cos(aimAngle);
-        var _rgtX  = Math.cos(aimAngle), _rgtZ  =  Math.sin(aimAngle);
-        discMesh.position.set(
-          discPos.x + _rgtX*0.32 + _fwdX*0.18,
-          _gndNow + 1.05,
-          discPos.z + _rgtZ*0.32 + _fwdZ*0.18
-        );
-        discMesh.rotation.y += 1.2 * dt;
-      }
-    } else if (discMesh) {
+  } else if (phase === "WALKING" || phase === "LANDED" || phase === "FLYING" || phase === "SCORED") {
+    PL.applyAvatar(dt);
+    if (phase === "FLYING" && localAvatarMesh && !localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) localAvatarMesh.children[7].rotation.z = -1.3;
+    if ((phase === "WALKING" || phase === "LANDED") && discMesh) {
+      // The disc lies on the ground where it stopped (or dangles from a thief)
       discMesh.visible = true;
-      discMesh.scale.setScalar(1.0);  // ensure full size in FP/non-TP modes
+      discMesh.scale.setScalar(DISC_SCALE_FLIGHT);
       discMesh.position.copy(discPos);
-      discMesh.position.y += Math.sin(T * 1.7) * 0.04;
-      discMesh.rotation.y += 0.55 * dt;
+      if (!ENT.carrying) { discMesh.rotation.x *= 0.9; discMesh.rotation.z *= 0.9; }
+      else { discMesh.rotation.x = 1.2; discMesh.rotation.y += dt * 4; }
     }
   }
-
-  // During flight: show disc at full size, hide avatar from behind camera
-  if (phase === "FLYING") {
-    if (discMesh) { discMesh.visible = true; discMesh.scale.setScalar(1.0); }
-    if (localAvatarMesh) {
-      localAvatarMesh.visible = (cameraMode === "tp");
-      // Avatar stays at last position watching the disc
-      if (!localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) {
-        localAvatarMesh.children[7].rotation.z = -1.3;  // arm thrown forward
-      }
-    }
+  if (!discMarker) { discMarker = _buildDiscMarker(); scene.add(discMarker); }
+  if (discMarker.visible) {
+    discMarker.position.set(discPos.x, discPos.y - 0.05, discPos.z);
+    var _pk = 1 + Math.sin(T * 4) * 0.12; discMarker.userData.ring.scale.set(_pk, _pk, _pk);
   }
-
-  // On land: restore avatar arm
-  if (phase === "LANDED" && localAvatarMesh) {
-    localAvatarMesh.visible = (cameraMode === "tp");
-    if (!localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) {
-      localAvatarMesh.children[7].rotation.z = -0.55;
-    }
-  }
-
 
   // Broadcast position ~15Hz
   if (mpMode && typeof sendToAll === "function") {
     _posBcastAcc = (_posBcastAcc||0) + dt;
     if (_posBcastAcc >= 0.067) {
       _posBcastAcc = 0;
-      if (phase === "AIMING" || phase === "LANDED") {
-        sendToAll({t:"pos",px:discPos.x,py:discPos.y,pz:discPos.z,aim:aimAngle,yaw:_avatarYaw,vm:Math.round(Math.hypot(_playerVelX,_playerVelZ)*10)/10});
+      if (phase !== "MENU") {
+        sendToAll({t:"pos",px:PL.pos.x,py:PL.pos.y,pz:PL.pos.z,aim:aimAngle,yaw:PL.yaw,an:PL.anim,vm:Math.round(Math.hypot(PL.vel.x,PL.vel.z)*10)/10});
       }
     }
   }
@@ -1836,10 +1699,19 @@ function animate() {
     });
   }
 
-  renderer.render(scene, camera);
+  // HUD: camera-relative wind arrow + minimap
+  if (typeof updateWindUI === "function" && (_nameLabelFrame % 4 === 0)) updateWindUI();
+  if (typeof drawMinimap === "function" && (_nameLabelFrame % 3 === 0)) drawMinimap();
+
+  AudioEngine.updateFlight(phase === "FLYING", discVel.length(), timeScale < 0.75);
+  var _focus = (phase === "FLYING") ? discPos : PL.pos;
+  GFX.update(dt, _focus);
+  GFX.render();
 }
 
 initMenuDecor();
+showMenuBackdrop();
+AudioEngine._loadSettings(); AudioEngine._syncUI();
 initMenuDiscCards();
 
 animate();
@@ -1881,8 +1753,4 @@ window.addEventListener("wheel", function(e) {
   }
 },{passive:true});
 
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-});
+window.addEventListener("resize", () => { GFX.resize(); });

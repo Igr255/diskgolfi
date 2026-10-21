@@ -22,31 +22,35 @@ function spawnPowerups(hole, idx) {
 
   const types = Object.keys(POWERUPS);
   const count = Math.min(3, Math.floor(idx * 0.4) + 1);
-  const wps = hole.waypoints;
+  const C = hole.course;
 
   for (let i = 0; i < count; i++) {
-    const wp = wps[Math.floor(srng() * wps.length)] || { x: 0, z: 0 };
-    const px = wp.x + (srng() - 0.5) * wp.r;
-    const pz = wp.z + (srng() - 0.5) * wp.r;
+    const wp = LV.pointAt(C.route, 0.2 + srng() * 0.65);
+    const px = wp.x + (srng() - 0.5) * 6;
+    const pz = wp.z + (srng() - 0.5) * 6;
     const ty = terrainY(px, pz, hole, idx);
-    if (ty < hole.water + 0.2) continue;
+    if (ty < C.hazardAt(px, pz).level + 0.2) continue;
+    if (C.ceiling && ty + 2 > C.ceiling) continue;
 
     const type = types[Math.floor(srng() * types.length)];
     const p = POWERUPS[type];
 
     const g = new THREE.Group();
     const star = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.4, 0),
-      new THREE.MeshBasicMaterial({ color: p.color })
+      new THREE.IcosahedronGeometry(0.38, 0),
+      new THREE.MeshStandardMaterial({ color: p.color, emissive: p.color, emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.3, flatShading: true })
     );
     g.add(star);
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.55, 0.05, 8, 16),
-      new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.5 })
+      new THREE.TorusGeometry(0.6, 0.04, 8, 40),
+      new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.8 })
     );
     ring.rotation.x = Math.PI / 2;
     g.add(ring);
-    g.position.set(px, ty + 0.8, pz);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GFX.softDotTexture(), color: p.color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.scale.setScalar(2.4);
+    g.add(halo);
+    g.position.set(px, ty + 1.0, pz);
     courseGrp.add(g);
     powerupMeshes.push({ mesh: g, type, x: px, z: pz, collected: false });
   }
@@ -73,7 +77,10 @@ function applyPowerup(type) {
   setTimeout(() => { banner.style.opacity = "0"; }, 2500);
 
   if (type === "speed") {
+    // Halves drag for the rest of this flight (see _discAero in physics.js)
     activePowerups.speed = { until: Date.now() + p.duration * 1000 };
+    var _hs = Math.hypot(discVel.x, discVel.z) || 1;
+    discVel.x += discVel.x / _hs * 4; discVel.z += discVel.z / _hs * 4;
   } else if (type === "magnet") {
     const toBasket = basketWP.clone().sub(discPos).normalize();
     discVel.add(toBasket.multiplyScalar(8));
@@ -82,10 +89,12 @@ function applyPowerup(type) {
   } else if (type === "lowgrav") {
     activePowerups.lowgrav = { until: Date.now() + p.duration * 1000 };
   } else if (type === "score") {
-    totalVsPar = Math.max(totalVsPar - 1, totalVsPar);
+    // One stroke off this hole
+    throwCount = Math.max(1, throwCount - 1);
     updateScoreUI();
   }
   spawnParticleBurst(discPos.clone(), new THREE.Color(p.color), 20);
+  AudioEngine.sfx("powerup");
 }
 
 // ══════════════════════════════════════════════════════════
