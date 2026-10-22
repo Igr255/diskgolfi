@@ -124,7 +124,7 @@ COS.UPGRADE = {
   ice: { pattern: "frost", trail: 0x9aeaff, particles: "snow" },
   toxic: { pattern: "biohazard", glowMap: true, trail: 0x8aff3a },
   galaxy: { pattern: "galaxy", glowMap: true, trail: 0x8a5aff },
-  holographic: { pattern: "holofoil", metal: true, trail: "rainbow" },
+  holographic: { pattern: "holofoil", metal: false, glow: null, trail: "rainbow" },
   rainbow: { pattern: "rainbowrings", trail: "rainbow", rainbow: false },
 };
 (function() {
@@ -144,7 +144,36 @@ COS.state = { cases: { disc: 0, style: 0 }, coins: 0, owned: {}, equip: { hat: n
   try { var s = JSON.parse(localStorage.getItem("dg_profile") || "null"); if (s) { Object.assign(COS.state, s); COS.state.cases = Object.assign({ disc: 0, style: 0 }, s.cases); COS.state.equip = Object.assign({ hat: null, aura: null, finish: null }, s.equip); } } catch (e) {}
   if (!COS.state.gift) { COS.state.gift = true; COS.state.cases.disc += 1; COS.state.cases.style += 1; }   // welcome gift: one of each
 })();
-COS.save = function() { try { localStorage.setItem("dg_profile", JSON.stringify(COS.state)); } catch (e) {} if (COS.onChange) COS.onChange(); };
+// Saving merges with what another tab may have saved (two tabs open for multiplayer testing
+// used to overwrite each other's unlocks), and other tabs' saves are picked up live.
+COS.save = function() {
+  try {
+    var stored = JSON.parse(localStorage.getItem("dg_profile") || "null");
+    if (stored && stored.owned) Object.keys(stored.owned).forEach(function(k) { if (stored.owned[k]) COS.state.owned[k] = true; });
+    localStorage.setItem("dg_profile", JSON.stringify(COS.state));
+  } catch (e) {}
+  if (COS.onChange) COS.onChange();
+};
+window.addEventListener("storage", function(e) {
+  try {
+    if (e.key === "dg_profile" && e.newValue) {
+      var s = JSON.parse(e.newValue), owned = Object.assign({}, COS.state.owned, s.owned || {});
+      Object.assign(COS.state, s); COS.state.owned = owned;
+      if (COS.onChange) COS.onChange();
+    } else if (e.key === "diskgolfi_unlocked" && e.newValue && typeof unlockedSkins !== "undefined") {
+      Object.assign(unlockedSkins, JSON.parse(e.newValue));
+    }
+  } catch (er) {}
+});
+// Secret: unlock every cosmetic (hats, auras, finishes, disc skins, characters)
+COS.unlockAll = function() {
+  COS.STYLE.forEach(function(s) { COS.state.owned[s.id] = true; });
+  if (typeof DISC_SKINS !== "undefined") { DISC_SKINS._global.concat(DISC_SKINS.vilov || []).forEach(function(s) { unlockedSkins[s.id] = true; }); saveUnlocked(); }
+  if (typeof PLAYER_SKINS !== "undefined") { PLAYER_SKINS.forEach(function(s) { unlockedPlayerSkins[s.id] = true; }); if (typeof saveUnlockedPlayerSkins === "function") saveUnlockedPlayerSkins(); }
+  COS.save();
+  if (typeof PF !== "undefined" && PF.open) PF.render();
+};
+COS.SECRET = "DRIPCHECK";
 COS.save();
 COS.ownsStyle = function(id) { return !!COS.state.owned[id]; };
 COS.ownsDisc = function(id) { return typeof unlockedSkins !== "undefined" && !!unlockedSkins[id]; };
@@ -381,8 +410,8 @@ COS.PAINT = {
     });
   },
   frost: function(g, e, pc, rnd) {
-    var gr = g.createRadialGradient(256, 256, 20, 256, 256, 256); gr.addColorStop(0, "#ffffff"); gr.addColorStop(1, "#7ad8f8"); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
-    g.strokeStyle = "rgba(255,255,255,.85)"; g.lineCap = "round";
+    var gr = g.createRadialGradient(256, 256, 20, 256, 256, 256); gr.addColorStop(0, "#d8f6ff"); gr.addColorStop(0.6, "#4ab8f0"); gr.addColorStop(1, "#1a6ab8"); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
+    g.strokeStyle = "rgba(255,255,255,.95)"; g.lineCap = "round";
     for (var i = 0; i < 6; i++) { var a = i / 6 * 6.283; g.lineWidth = 6; g.beginPath(); g.moveTo(256, 256); g.lineTo(256 + Math.cos(a) * 230, 256 + Math.sin(a) * 230); g.stroke();
       for (var k = 1; k < 5; k++) { var d = k * 46; g.lineWidth = 4; [-1, 1].forEach(function(s2) { g.beginPath(); g.moveTo(256 + Math.cos(a) * d, 256 + Math.sin(a) * d); g.lineTo(256 + Math.cos(a) * (d + 34) + Math.cos(a + s2 * 1.57) * 26, 256 + Math.sin(a) * (d + 34) + Math.sin(a + s2 * 1.57) * 26); g.stroke(); }); } }
   },
@@ -662,19 +691,71 @@ COS.dressAvatar = function(av, cos) {
   var box = new THREE.Box3().setFromObject(glb), top = box.max.y;
   if (head) {
     var hp = new THREE.Vector3(); head.getWorldPosition(hp);
-    var local = head.worldToLocal(new THREE.Vector3(hp.x, top - 0.02, hp.z));
     var ws = new THREE.Vector3(); head.getWorldScale(ws);
     var qb = new THREE.Quaternion(); head.getWorldQuaternion(qb);
     var qa = new THREE.Quaternion(); av.getWorldQuaternion(qa);
-    hat.position.copy(local);
-    hat.scale.setScalar(1 / ws.x);
+    // Fit to the skull: hats are modelled for a head ~0.42 m wide with y = 0 on top
+    var fit = COS.headFit(glb, head, hp, qa), size = 1, at = new THREE.Vector3(hp.x, top - 0.02, hp.z);
+    if (fit) { size = fit.halfW / 0.21; at.set(fit.cx, fit.top - 0.02 * size, fit.cz).applyQuaternion(qa).add(hp); }
+    hat.position.copy(head.worldToLocal(at));
+    hat.scale.setScalar(size / ws.x);
     hat.quaternion.copy(qb.invert().multiply(qa));
     head.add(hat);
   } else {
-    var lp = av.worldToLocal(new THREE.Vector3(0, top, 0));
-    hat.position.set(0, lp.y - 0.02, 0);
+    var ap = new THREE.Vector3(); av.getWorldPosition(ap);
+    var aq = new THREE.Quaternion(); av.getWorldQuaternion(aq);
+    var as = new THREE.Vector3(); av.getWorldScale(as);
+    var tf = COS.topFit(glb, ap, aq);
+    if (tf) { var sz = tf.halfW / 0.21; hat.position.set(tf.cx / as.x, (tf.top - 0.02 * sz) / as.y, tf.cz / as.z); hat.scale.setScalar(sz / as.x); }
+    else { var lp = av.worldToLocal(new THREE.Vector3(0, top, 0)); hat.position.set(0, lp.y - 0.02, 0); }
     av.add(hat);
   }
+};
+// Measure the skull from the vertices skinned to the head bone, in the avatar's frame
+// (origin at the head bone). Spiky or tall hair is ignored: the "top" is the highest
+// slice that is still nearly as wide as the head, so hats sit on the crown, not on a quiff.
+COS.headFit = function(glb, head, hp, qa) {
+  var pts = [], qi = qa.clone().invert(), v = new THREE.Vector3(), M = new THREE.Matrix4();
+  glb.updateMatrixWorld(true);
+  glb.traverse(function(m) {
+    if (!m.isSkinnedMesh || !m.skeleton) return;
+    var hi = m.skeleton.bones.indexOf(head); if (hi < 0) return;
+    var g = m.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight; if (!si || !sw) return;
+    M.copy(m.matrixWorld).multiply(m.bindMatrixInverse).multiply(head.matrixWorld).multiply(m.skeleton.boneInverses[hi]).multiply(m.bindMatrix);
+    var get = [function(a, i) { return a.getX(i); }, function(a, i) { return a.getY(i); }, function(a, i) { return a.getZ(i); }, function(a, i) { return a.getW(i); }];
+    var wMax = sw.normalized ? (sw.array instanceof Uint8Array ? 255 : sw.array instanceof Uint16Array ? 65535 : 1) : 1;
+    for (var i = 0; i < pos.count; i++) {
+      var w = 0; for (var k = 0; k < 4; k++) if (get[k](si, i) === hi) w += get[k](sw, i) / wMax;
+      if (w < 0.6) continue;
+      v.fromBufferAttribute(pos, i).applyMatrix4(M).sub(hp).applyQuaternion(qi); pts.push(v.clone());
+    }
+  });
+  return pts.length < 40 ? null : COS._sliceFit(pts);
+};
+// Unrigged models (mannequin, rubber duck): measure the top of the mesh instead
+COS.topFit = function(glb, origin, qa) {
+  var pts = [], qi = qa.clone().invert(), v = new THREE.Vector3();
+  glb.updateMatrixWorld(true);
+  glb.traverse(function(m) {
+    if (!m.isMesh || m.userData.cosHat) return;
+    var pos = m.geometry.attributes.position, step = Math.max(1, Math.floor(pos.count / 6000));
+    for (var i = 0; i < pos.count; i += step) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).sub(origin).applyQuaternion(qi); pts.push(v.clone()); }
+  });
+  if (pts.length < 40) return null;
+  var y1 = -Infinity, y0 = Infinity; pts.forEach(function(p) { y1 = Math.max(y1, p.y); y0 = Math.min(y0, p.y); });
+  var cut = y1 - (y1 - y0) * 0.13;   // the head is roughly the top eighth of a figure
+  return COS._sliceFit(pts.filter(function(p) { return p.y > cut; }));
+};
+COS._sliceFit = function(pts) {
+  if (pts.length < 20) return null;
+  var y0 = Infinity, y1 = -Infinity; pts.forEach(function(p) { y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); });
+  var N = 24, sl = []; for (var j = 0; j < N; j++) sl.push({ x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity });
+  pts.forEach(function(p) { var b = sl[Math.min(N - 1, Math.floor((p.y - y0) / (y1 - y0 + 1e-6) * N))]; b.x0 = Math.min(b.x0, p.x); b.x1 = Math.max(b.x1, p.x); b.z0 = Math.min(b.z0, p.z); b.z1 = Math.max(b.z1, p.z); });
+  var wOf = function(b) { return b.x1 > b.x0 ? b.x1 - b.x0 : 0; }, maxW = 0, wide = null;
+  sl.forEach(function(b) { maxW = Math.max(maxW, wOf(b)); });
+  for (j = N - 1; j >= 0; j--) if (wOf(sl[j]) >= maxW * 0.72) { wide = j; break; }
+  var ref = sl[wide];
+  return { halfW: maxW / 2, top: y0 + (wide + 1) / N * (y1 - y0), cx: (ref.x0 + ref.x1) / 2, cz: (ref.z0 + ref.z1) / 2 };
 };
 COS.applyFinish = function(glb, id) {
   glb.traverse(function(m) {

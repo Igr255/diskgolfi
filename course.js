@@ -21,6 +21,7 @@ function Course(hole) {
   this.movers = [];
   this.pools = [];
   this.hf = null;
+  this.outer = null;            // surrounding landscape height (visual ground, out of bounds)
   this.floor = null;           // flat floor height inside bounds (city streets, interiors)
   this.ceiling = null;
   this.hazard = { type: "water", level: -1.5, base: -1.5 };
@@ -53,7 +54,8 @@ Course.prototype._contains = function(s, x, z) {
     return -Infinity;
   }
   var dx = x - s.x, dz = z - s.z;
-  if (s.rot) { var c = Math.cos(-s.rot), sn = Math.sin(-s.rot); var lx = dx * c - dz * sn; dz = dx * sn + dz * c; dx = lx; }
+  // world → local for a mesh rotated by rotation.y = rot (local +z points along (sin rot, cos rot))
+  if (s.rot) { var c = Math.cos(s.rot), sn = Math.sin(s.rot); var lx = dx * c - dz * sn; dz = dx * sn + dz * c; dx = lx; }
   if (Math.abs(dx) <= s.hw && Math.abs(dz) <= s.hd) {
     if (s.ramp) {   // sloped top along local z: from top (at -hd) to top2 (at +hd)
       return s.top + (s.top2 - s.top) * ((dz + s.hd) / (2 * s.hd));
@@ -74,6 +76,13 @@ Course.prototype._inPool = function(x, z) {
 Course.prototype.inBounds = function(x, z) {
   var b = this.bounds; return x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
 };
+// The playable area: the heightfield when there is one, otherwise the bounds.
+// Beyond it the surrounding landscape (this.outer, set by WORLD) is solid ground but out of bounds.
+Course.prototype.inPlay = function(x, z) {
+  var f = this.hf;
+  if (f) return x >= f.x0 && x <= f.maxX && z >= f.z0 && z <= f.maxZ;
+  return this.inBounds(x, z);
+};
 
 // Ground height at (x, z). Below the hazard level means "hazard here".
 Course.prototype.heightAt = function(x, z) {
@@ -86,7 +95,10 @@ Course.prototype.heightAt = function(x, z) {
   var cell = this.grid[Math.floor(x / COURSE_CELL) + "," + Math.floor(z / COURSE_CELL)];
   if (cell) for (var i = 0; i < cell.length; i++) { var t = this._contains(cell[i], x, z); if (t > h) h = t; }
   for (var m = 0; m < this.movers.length; m++) { var tm = this._contains(this.movers[m], x, z); if (tm > h) h = tm; }
-  if (h === -Infinity) return this.hazard.type === "void" || this.hazard.type === "none" ? -80 : this.hazard.level - 2;
+  if (h === -Infinity) {
+    if (this.outer && !this.inPlay(x, z)) { var o = this.outer(x, z); if (o > this.hazard.level) return o; }
+    return this.hazard.type === "void" || this.hazard.type === "none" ? -80 : this.hazard.level - 2;
+  }
   return h;
 };
 
@@ -103,6 +115,7 @@ Course.prototype.supportAt = function(x, z) {
 Course.prototype.hazardAt = function(x, z) {
   var p = this.pools.length ? this._inPool(x, z) : null;
   if (p) return { level: p.level, type: p.type || "water" };
+  if (this.outer && !this.inPlay(x, z)) { var o = this.outer(x, z); if (o > this.hazard.level) return { level: o + 0.6, type: "ob" }; }
   return this.hazard;
 };
 Course.prototype.isHazard = function(x, z) { var hz = this.hazardAt(x, z); return this.heightAt(x, z) < hz.level + 0.3; };

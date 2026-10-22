@@ -237,7 +237,7 @@ LV.islands = function(c, hole, idx, d, spawns) {
 // ══════════════════════════════════════════════════════════════════════════════
 LV.HL = {
   mountains:   { amp: 15, slope: 0.45, prof: function(t) { return 9 * t + 1.5 * Math.sin(t * 7); }, rivers: [0.3], fw: 9, top: 0x5a8a3a, side: 0x6a6a70, snow: 13, label: "Alpine pass" },
-  winter:      { amp: 9,  slope: 0.35, prof: function(t) { return 3 + 3 * Math.sin(t * 5.5); }, rivers: [0.45], fw: 9, top: 0xf2f6fb, side: 0x8a9aaa, snow: -99, label: "Snowfield", surf: "snow" },
+  winter:      { amp: 9,  slope: 0.35, prof: function(t) { return 3 + 3 * Math.sin(t * 5.5); }, rivers: [0.45], fw: 9, top: 0xc2d0e0, side: 0x6a7a8c, snow: -99, label: "Snowfield", surf: "snow" },
   grandcanyon: { amp: 20, slope: 0.6, prof: function(t) { return 7 + 1.5 * Math.sin(t * 4); }, rivers: [0.35, 0.72], fw: 7, top: 0xc8783e, side: 0xa0502a, strata: true, label: "Canyon run", surf: "sand", riverW: 6 },
   waterfall:   { amp: 12, slope: 0.5, prof: function(t) { return Math.round((1 - t) * 3.4) * 4; }, rivers: [0.88], fw: 8, top: 0x3a8a3a, side: 0x4a5a4a, falls: true, label: "Cascades" },
   village:     { amp: 4,  slope: 0.25, prof: function(t) { return 1.2 + Math.sin(t * 6) * 1.2; }, rivers: [0.55], fw: 11, top: 0x6aa83a, side: 0x7a6a58, label: "Village green" },
@@ -263,6 +263,13 @@ LV.highlands = function(c, hole, idx, d, spawns) {
     return { x: p.x, z: p.z, nx: p.dx, nz: p.dz, w: (cfg.riverW || 3.5) + d * 2.5 };   // river runs perpendicular to the route
   });
   var seedOx = srng() * 100, seedOz = srng() * 100;
+  // Cascades: a stream runs down the valley beside the fairway and pours over each terrace
+  var stream = null;
+  if (cfg.falls) {
+    var side = srng() < 0.5 ? -1 : 1, off = fw + 3.5;
+    stream = [];
+    for (var si = 0; si <= 60; si++) { var sp = LV.pointAt(pts, si / 60); stream.push({ x: sp.x - sp.dz * off * side, z: sp.z + sp.dx * off * side }); }
+  }
   function base(x, z) {
     var pd = LV.polyDist(pts, x, z), hc = cfg.prof(pd.t);
     var nse = _gfxFbm2(x / 38 + seedOx, z / 38 + seedOz, 4);
@@ -270,18 +277,23 @@ LV.highlands = function(c, hole, idx, d, spawns) {
     var hills = hc + (nse - 0.5) * 2 * cfg.amp * 0.7 + Math.max(0, pd.d - fw - 8) * cfg.slope;
     var h = hc + (nse - 0.5) * 1.6 + (1 - edge) * 0 ;
     h = h + (hills - h) * edge;
+    if (stream) { var sd = LV.polyDist(stream, x, z).d; if (sd < 2.2) h -= 0.6 * (1 - sd / 2.2); }   // shallow stream bed
     // keep the tee and the basket on dry, level ground
     var dEnd = Math.min(Math.hypot(x - pts[0].x, z - pts[0].z), Math.hypot(x - pts[pts.length - 1].x, z - pts[pts.length - 1].z));
     if (dEnd < 9) h = Math.max(h, W + 1.4 + (1 - _sstep(5, 9, dEnd)) * 0.3);
     for (var r = 0; r < rivers.length; r++) {
       var R = rivers[r], along = (x - R.x) * R.nx + (z - R.z) * R.nz;   // distance across the river
       var aw = Math.abs(along + Math.sin((x * R.nz - z * R.nx) * 0.08) * 1.5);
-      if (aw < R.w + 3) { var bed = W - 1.6; h = Math.min(h, bed + (h - bed) * _sstep(R.w, R.w + 3, aw)); }
+      var bankW = 3 + Math.max(0, h - W) * 1.6;   // a valley, not a gorge: the higher the hill, the wider the slope
+      if (aw < R.w + bankW) { var bed = W - 1.6; h = Math.min(h, bed + (h - bed) * _sstep(R.w, R.w + bankW, aw)); }
     }
     return h;
   }
   // Terraces: crisp 1 m ledges you hop up
+  // (only the Cascades keep them — everywhere else the hills roll naturally)
   function post(h) { if (h < W + 0.2) return h; var f = Math.floor(h), fr = h - f; return f + _sstep(0.8, 1.0, fr); }
+  if (!cfg.falls) post = null;
+  c.rivers = rivers;
   var minX = -70 - 25, maxX = 70 + 25, minZ = -L - 50, maxZ = 50;
   c.setHeightfield(minX, maxX, minZ, maxZ, 1.0, base, post);
   c.bounds = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ };
@@ -292,13 +304,20 @@ LV.highlands = function(c, hole, idx, d, spawns) {
 
   // River crossings: bridge early, stones later
   rivers.forEach(function(R) {
-    var ax = R.x - R.nx * (R.w + 2.5), az = R.z - R.nz * (R.w + 2.5), bx = R.x + R.nx * (R.w + 2.5), bz = R.z + R.nz * (R.w + 2.5);
-    var ay = c.heightAt(ax, az), by = c.heightAt(bx, bz);
+    // The river sits in a valley: walk out from the water until each bank is above the
+    // highest tide, so the crossing starts and ends on dry ground with a level deck
+    var deck = W + (c.tideMax || 0) + 0.9;
+    var bank = function(sgn) {
+      for (var dd = R.w + 1; dd < R.w + 45; dd += 0.25) { var x = R.x + R.nx * dd * sgn, z = R.z + R.nz * dd * sgn; if (c.heightAt(x, z) >= deck) return { x: x, z: z }; }
+      return { x: R.x + R.nx * (R.w + 45) * sgn, z: R.z + R.nz * (R.w + 45) * sgn };
+    };
+    var A = bank(-1), Bk = bank(1), ax = A.x, az = A.z, bx = Bk.x, bz = Bk.z;
+    var ay = Math.max(deck, c.heightAt(ax, az)), by = Math.max(deck, c.heightAt(bx, bz));
     if (d < 0.25) LV.bridge(c, ax, az, ay, bx, bz, by, 2.4);
     else LV.stones(c, ax, az, ay, bx, bz, by, d, { bob: hole.mods.indexOf("restless") >= 0, bottom: W - 3 });
   });
   // Waterfalls pouring off the terrace cliffs beside the fairway
-  if (cfg.falls) LV.waterfalls(c, hole, pts, fw);
+  if (stream) LV.cascade(c, stream);
 
   // Grass + flowers along the fairway
   LV.grass(c, hole, pts, fw + 4, 9000);
@@ -342,58 +361,87 @@ LV.terrainMesh = function(c, hole, cfg, minX, maxX, minZ, maxZ, cell) {
   g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   g.setIndex(idx); g.computeVertexNormals();
   var st = GFX.surfaceTexture(cfg.surf === "snow" ? "snow" : cfg.surf === "sand" ? "sand" : "grass", null);
-  var m = new THREE.MeshStandardMaterial({ vertexColors: true, map: st.map, bumpMap: st.bump || null, bumpScale: 0.03, roughness: 0.95 });
+  var m = typeof WORLD !== "undefined"
+    ? WORLD.terrainMaterial(hole.theme, W, { play: { minX: minX, minZ: minZ, maxX: maxX, maxZ: maxZ } })   // same shader as the surrounding landscape → no seam
+    : new THREE.MeshStandardMaterial({ vertexColors: true, map: st.map, bumpMap: st.bump || null, bumpScale: 0.03, roughness: 0.95 });
   var mesh = new THREE.Mesh(g, m);
   mesh.receiveShadow = true; mesh.castShadow = true;
   c.group.add(mesh);
   return mesh;
 };
 
-// Animated waterfall sheets where the terrain drops steeply beside the fairway
-LV.waterfalls = function(c, hole, pts, fw) {
-  var mat = LV.waterfallMat();
-  for (var t = 0.08; t < 0.95; t += 0.01) {
-    var p = LV.pointAt(pts, t), p2 = LV.pointAt(pts, t + 0.012);
-    var h1 = c.heightAt(p.x, p.z), h2 = c.heightAt(p2.x, p2.z);
-    if (h1 - h2 < 3) continue;
-    [-1, 1].forEach(function(side) {
-      var off = fw + 3 + srng() * 6, x = p.x - p.dz * off * side, z = p.z + p.dx * off * side;
-      var top = c.heightAt(x, z) + 0.3, bot = c.heightAt(x + p.dx * 4, z + p.dz * 4);
-      if (top - bot < 2.5) return;
-      var w = 3 + srng() * 3, h = top - bot + 0.6;
-      var geo = new THREE.PlaneGeometry(w, h, 1, 8);
-      var pa = geo.attributes.position;
-      for (var i = 0; i < pa.count; i++) { var yy = pa.getY(i), k = Math.max(0, Math.min(1, (h / 2 - yy) / h)); pa.setZ(i, Math.pow(k, 1.6) * 2.2); }   // curved lip
-      geo.computeVertexNormals();
-      var m = new THREE.Mesh(geo, mat);
-      m.position.set(x + p.dx * 1.6, bot + h / 2 - 0.3, z + p.dz * 1.6);
-      m.rotation.y = Math.atan2(p.dx, p.dz) + Math.PI;
-      m.renderOrder = 2;
-      c.group.add(m);
-      // splash pool + mist at the bottom
-      var pool = new THREE.Mesh(new THREE.CircleGeometry(w * 0.7, 20), new THREE.MeshStandardMaterial({ color: 0x9adcf0, roughness: 0.1, transparent: true, opacity: 0.8 }));
-      pool.rotation.x = -Math.PI / 2; pool.position.set(x + p.dx * 3.2, bot + 0.05, z + p.dz * 3.2); c.group.add(pool);
-      LV.mist(c, x + p.dx * 3.2, bot + 0.4, z + p.dz * 3.2, w);
-    });
-    t += 0.06;
+LV.cascade = function(c, stream) {
+  // sample the stream bed every 0.4 m
+  var smp = [], W = c.hazard.level;
+  for (var t = 0; t <= 1.0001; t += 0.4 / Math.max(1, LV._polyLen(stream))) {
+    var p = LV.pointAt(stream, Math.min(1, t)), y = c.heightAt(p.x, p.z);
+    if (y < W + 0.2) break;                                  // reached the river / lake
+    smp.push({ x: p.x, z: p.z, dx: p.dx, dz: p.dz, y: y });
   }
+  if (smp.length < 4) return;
+  // water level: never rises downstream; a drop of more than 0.5 m becomes a waterfall
+  var lvl = smp[0].y + 0.22, verts = [];   // {x,z,y,slope,dx,dz}
+  for (var i = 0; i < smp.length; i++) {
+    var s2 = smp[i], ground = s2.y + 0.22;
+    if (ground < lvl - 0.5) {
+      // A stack of small ledges close together falls as one: find the lowest point in the next ~2 m
+      var j = i, lowest = ground;
+      for (var q = i + 1; q < Math.min(smp.length, i + 6); q++) { var gq = smp[q].y + 0.22; if (gq < lowest - 0.3) { lowest = gq; j = q; } }
+      var f = smp[j];
+      // water shoots over the lip at the old level, then drops straight down
+      verts.push({ x: s2.x, z: s2.z, y: lvl, slope: 0.6, dx: s2.dx, dz: s2.dz });
+      verts.push({ x: f.x, z: f.z, y: lvl, slope: 1, dx: f.dx, dz: f.dz });
+      verts.push({ x: f.x + f.dx * 0.05, z: f.z + f.dz * 0.05, y: lowest, slope: 1, dx: f.dx, dz: f.dz });
+      LV.splash(c, f.x + f.dx * 0.6, lowest, f.z + f.dz * 0.6, lvl - lowest);
+      lvl = lowest; i = j;
+    } else {
+      lvl = Math.min(lvl, ground);
+      verts.push({ x: s2.x, z: s2.z, y: lvl, slope: 0, dx: s2.dx, dz: s2.dz });
+    }
+  }
+  // ribbon geometry along the verts
+  var pos = [], uv = [], sl = [], idx = [], dist = 0, w = 1.35;
+  verts.forEach(function(v, k) {
+    if (k) dist += Math.hypot(v.x - verts[k - 1].x, v.y - verts[k - 1].y, v.z - verts[k - 1].z);
+    var px = -v.dz * w, pz = v.dx * w;
+    pos.push(v.x + px, v.y, v.z + pz, v.x - px, v.y, v.z - pz);
+    uv.push(0, dist / 3, 1, dist / 3); sl.push(v.slope, v.slope);
+    if (k) { var a = (k - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  });
+  var g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("slope", new THREE.Float32BufferAttribute(sl, 1));
+  g.setIndex(idx); g.computeVertexNormals();
+  var m = new THREE.Mesh(g, LV.waterfallMat()); m.renderOrder = 2; m.userData.noBatch = true;
+  c.group.add(m);
+};
+LV._polyLen = function(pts) { var l = 0; for (var i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z); return l; };
+// Foam pool + spray where a fall lands
+LV.splash = function(c, x, y, z, h) {
+  var foam = new THREE.Mesh(new THREE.CircleGeometry(1.6, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, map: GFX.softDotTexture(), transparent: true, opacity: 0.75, depthWrite: false }));
+  foam.rotation.x = -Math.PI / 2; foam.position.set(x, y + 0.05, z); foam.renderOrder = 3; c.group.add(foam);
+  c.updaters.push(function(T) { var k = 1 + Math.sin(T * 7 + x) * 0.08; foam.scale.set(k, k, k); });
+  LV.mist(c, x, y + 0.2, z, 1.2 + h * 0.15);
 };
 LV.waterfallMat = function() {
   if (LV._wfm) return LV._wfm;
   LV._wfm = new THREE.ShaderMaterial({
     uniforms: { time: GFX.time },
-    vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+    vertexShader: "attribute float slope; varying vec2 vUv; varying float vS; void main(){ vUv = uv; vS = slope; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
     fragmentShader: [
-      "uniform float time; varying vec2 vUv;",
+      "uniform float time; varying vec2 vUv; varying float vS;",
       "float h(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }",
       "float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y); }",
       "void main(){",
-      "  vec2 p = vec2(vUv.x * 6.0, vUv.y * 3.0 + time * 2.6);",
-      "  float s = n(p * vec2(1.0, 0.35)) * 0.6 + n(p * vec2(2.3, 0.8)) * 0.4;",
-      "  float foam = smoothstep(0.55, 0.85, s) + smoothstep(0.25, 0.0, vUv.y) * 0.8;",
-      "  vec3 col = mix(vec3(0.35, 0.7, 0.88), vec3(0.95, 0.98, 1.0), clamp(foam, 0.0, 1.0));",
-      "  float a = 0.62 + foam * 0.35;",
-      "  a *= smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);",
+      "  float speed = mix(0.6, 3.2, vS);",
+      "  vec2 p = vec2(vUv.x * mix(3.0, 7.0, vS), vUv.y * mix(2.0, 1.2, vS) - time * speed);",
+      "  float s = n(p * vec2(1.0, mix(1.0, 0.25, vS))) * 0.6 + n(p * vec2(2.3, 0.9) + 3.1) * 0.4;",
+      "  float edge = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);",
+      "  float foam = mix(smoothstep(0.62, 0.9, s) * 0.7, smoothstep(0.35, 0.75, s) + 0.25, vS) + (1.0 - edge) * 0.35;",
+      "  vec3 deep = vec3(0.12, 0.42, 0.55), lite = vec3(0.45, 0.78, 0.88);",
+      "  vec3 col = mix(mix(deep, lite, s * 0.6 + vS * 0.3), vec3(0.96, 0.99, 1.0), clamp(foam, 0.0, 1.0));",
+      "  float a = mix(0.82, 0.72 + foam * 0.25, vS) * mix(0.55, 1.0, edge);",
       "  gl_FragColor = vec4(col, a);",
       "  #include <encodings_fragment>",
       "}"].join("\n"),

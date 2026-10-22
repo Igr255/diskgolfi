@@ -8,7 +8,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 LV.INT = {
   backrooms: { S: 8, H: 4.6, open: 0.5, floor: ["carpet", 0xb8a030], wall: ["wallpaper", 0xd8c870], light: 0xfff4c0, label: "Level 0" },
-  poolrooms: { S: 8, H: 6.0, open: 0.45, floor: ["tile", 0xf2f4ee], wall: ["tile", 0xeef4f2], light: 0xf0ffff, label: "The pools" },
+  poolrooms: { S: 8, H: 6.0, open: 0.45, floor: ["tile", 0xd8e2de], wall: ["tile", 0xdbe6e4], light: 0xe0f4f4, label: "The pools" },
   office:    { S: 9, H: 5.2, open: 0.4, floor: ["carpet", 0x5a6a7a], wall: ["plastic", 0xe6e2da], light: 0xf4f8ff, label: "Open plan" },
 };
 
@@ -180,7 +180,7 @@ LV.ceilingLights = function(c, hole, cols, rows, cx, cz, S, H, color) {
   var panels = [], geo = new THREE.BoxGeometry(1.25, 0.06, 0.62);
   for (var i = 0; i < cols; i++) for (var j = 0; j < rows; j++) {
     for (var k = 0; k < 2; k++) {
-      var m = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: new THREE.Color(color), emissiveIntensity: 1.5, roughness: 0.5 });
+      var m = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: new THREE.Color(color), emissiveIntensity: 1.2, roughness: 0.5 });
       var p = new THREE.Mesh(geo, m);
       p.position.set(cx(i) + (k ? 1.6 : -1.6), H - 0.03, cz(j));
       p.userData.noBatch = true;
@@ -328,12 +328,13 @@ LV.blockTex = function(type) {
       break;
   }
   var t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapLinearFilter; t.encoding = THREE.sRGBEncoding; t._dgShared = true;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;   // big boxes (tree canopies, bridges) tile the block texture
   return (LV._bt[type] = t);
 };
 LV.blockMat = function(type) {
   LV._bm = LV._bm || {};
   if (LV._bm[type]) return LV._bm[type];
-  var m = new THREE.MeshStandardMaterial({ map: LV.blockTex(type), roughness: 0.95, transparent: type === "leaves", alphaTest: type === "leaves" ? 0.5 : 0 });
+  var m = new THREE.MeshStandardMaterial({ map: LV.blockTex(type), roughness: 0.95, alphaTest: type === "leaves" ? 0.5 : 0, side: type === "leaves" ? THREE.DoubleSide : THREE.FrontSide });
   m.userData.shared = true;
   return (LV._bm[type] = m);
 };
@@ -357,6 +358,7 @@ LV.voxelMesh = function(c, V, kinds) {
     var mesh = new THREE.InstancedMesh(geo, mats, n);
     for (var q = 0; q < n; q++) { m4.makeTranslation(arr[q * 3], arr[q * 3 + 1], arr[q * 3 + 2]); mesh.setMatrixAt(q, m4); }
     mesh.instanceMatrix.needsUpdate = true; mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.noBatch = true;
+    mesh.frustumCulled = false;   // instances span the whole world; culling by the base cube's bounds made blocks vanish
     c.group.add(mesh);
   });
 };

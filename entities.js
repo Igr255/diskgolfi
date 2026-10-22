@@ -739,7 +739,7 @@ ENT.spawnAll = function(h, spawns, idx) {
   var dog = function(p, z) { wanderer(p, z, ENT.glb("shiba_inu", 1.1, ENT.M.pig()), { speed: 2.2, chase: 10, r: 0.6, h: 1.1, knock: 6, clips: { walk: ["Walk"], run: ["Gallop"], idle: ["Idle", "Idle_2"] }, canSteal: true }); };
   var bunny = function(p, z) { wanderer(p, z, ENT.glb("bunny", 1.4, ENT.M.pig()), { speed: 2.4, flee: 6, r: 0.5, h: 1.4, hop: 10, hopH: 0.55, idleChance: 0.5, canSteal: steal || th === "feet_bunnies" || th === "cabbage" }); };
   var minion = function(p, z, i) { var m = ENT.M.minion(i % 3 === 0); wanderer(p, z, m, { type: "minion", speed: 1.5, chase: 7, r: 0.4, h: 1.3, waddle: 14, hop: i % 4 === 0 ? 6 : 0, hopH: 0.3, knock: 3, canSteal: steal || idx >= 4 }); };
-  var jogger = function(lane, i) { return ENT.add({ type: "jogger", mesh: ENT.glb("animated_woman", 1.75, ENT.M.npc("skin_citizen3")), x: lane.x0, z: lane.z0, r: 0.4, h: 1.75, speed: i % 2 ? 1.4 : 3.6, update: ENT.B.lane, lane: lane, polite: false, knock: 5, clips: { walk: ["Walking"], run: ["Running"], idle: ["Idle"] } }); };
+  var jogger = function(lane, i) { return ENT.add({ type: "jogger", mesh: ENT.glb("animated_woman", 1.75, ENT.M.npc("skin_casual")), x: lane.x0, z: lane.z0, r: 0.4, h: 1.75, speed: i % 2 ? 1.4 : 3.6, update: ENT.B.lane, lane: lane, polite: false, knock: 5, clips: { walk: ["Walking"], run: ["Running"], idle: ["Idle"] } }); };
   var tree = function(p, key, hgt, r) { ENT.add({ type: "tree", mesh: ENT.glb(key, hgt, buildTree ? buildTree(hgt / 6, th) : new THREE.Group()), x: p.x, z: p.z, y: p.y, r: r || 0.6, h: hgt, update: ENT.B.prop, yaw: srng() * 6.28 }); };
   var prop = function(p, mesh, r, hgt, o) {
     if (mesh && !mesh.isObject3D) { mesh = mesh.mesh || new THREE.Group(); GFX.batchStatic(mesh, true); }
@@ -774,7 +774,7 @@ ENT.spawnAll = function(h, spawns, idx) {
     // ── Lagoon islands ──
     case "funny": many(n0, chick); many(n0 * 0.4, rooster); many(2, function(p) { prop(p, ENT.glb("cube", 1.2, new THREE.Group()), 0.7, 1.2); }); break;
     case "minion": many(n0 * 1.4, minion); break;
-    case "emote": many(n0, function(p, z, i) { var keys = ["skin_trainer", "skin_crypto", "skin_furry", "skin_ninja", "skin_citizen3", "skin_robot"]; ENT.add({ type: "dancer", mesh: ENT.M.npc(keys[i % keys.length]), x: p.x, z: p.z, y: p.y, r: 0.4, h: 1.75, update: ENT.B.dancer, bounce: 0.15, spinOnBar: i % 2 === 0, clips: { a: ["Jump"], b: ["Sprint", "Walk"] }, knock: 3, yaw: srng() * 6 }); }); many(3, function(p) { prop(p, ENT.glb("arrow", 2.4, new THREE.Group()), 0.3, 2.4, { update: ENT.B.floater, spinRate: 0.6 }); }); break;
+    case "emote": many(n0, function(p, z, i) { var keys = ["skin_man", "skin_casual", "skin_punk", "skin_hoodie", "skin_beach", "skin_dress"]; ENT.add({ type: "dancer", mesh: ENT.M.npc(keys[i % keys.length]), x: p.x, z: p.z, y: p.y, r: 0.4, h: 1.75, update: ENT.B.dancer, bounce: 0.15, spinOnBar: i % 2 === 0, clips: { a: ["Jump"], b: ["Sprint", "Run", "Walk"] }, knock: 3, yaw: srng() * 6 }); }); many(3, function(p) { prop(p, ENT.glb("arrow", 2.4, new THREE.Group()), 0.3, 2.4, { update: ENT.B.floater, spinRate: 0.6 }); }); break;
     case "public_poo": many(n0 * 0.6, function(p) { prop(p, typeof buildToilet === "function" ? buildToilet() : new THREE.Group(), 0.6, 1.2, { sway: 4 }); }); many(n0 * 0.5, function(p, z) { wanderer(p, z, typeof buildPoo === "function" ? buildPoo() : new THREE.Group(), { speed: 0.8, hop: 7, hopH: 0.35, r: 0.5, h: 0.8, knock: 3 }); }); break;
     case "eerie": many(n0 * 0.5, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.M.ghost(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i * 1.7, fade: true }); }); many(n0 * 0.5, function(p) { tree(p, "tree", 5, 0.4); }); break;
     case "terrifying": case "screaming_mamamia":
@@ -789,7 +789,7 @@ ENT.spawnAll = function(h, spawns, idx) {
     case "grandcanyon": many(n0 * 0.8, function(p) { prop(p, ENT.M.cactus(), 0.4, 3.4, { knock: 4 }); }); many(n0 * 0.4, function(p) { prop(p, ENT.glb("rock", R(1, 2.5), new THREE.Group()), 1, 1.8); }); rollerAcross(1 + idx * 0.2, ENT.M.tumbleweed, 4.2, 0.6); break;
     case "waterfall": many(n0 * 1.1, function(p) { tree(p, "tree", R(5, 7), 0.5); }); many(n0 * 0.5, function(p) { prop(p, ENT.glb("rock", R(1, 2), new THREE.Group()), 1, 1.5); }); many(n0 * 0.3, chick); break;
     case "village": many(n0 * 0.5, function(p, z, i) { var off = 14 + srng() * 6, sp = { x: p.x + (srng() < 0.5 ? -off : off), z: p.z }; sp.y = c.heightAt(sp.x, sp.z); if (sp.y > c.hazard.level + 0.5) prop(sp, ENT.M.house(LV.pick([0xf0e6d0, 0xe8d0b8, 0xd8e4f0, 0xf4e8a8])), 3, 5.5, { yaw: Math.atan2(p.x - sp.x, p.z - sp.z) }); }); many(n0, chick); many(n0 * 0.4, rooster); many(n0 * 0.5, function(p) { tree(p, "tree", R(5, 7), 0.5); }); ENT.routeLanes(c, 1, function(lane) { ENT.add({ type: "tractor", mesh: ENT.glb("tractor", 2.4, typeof buildTractor === "function" ? buildTractor() : new THREE.Group()), x: lane.x0, z: lane.z0, r: 1.3, h: 2.4, speed: 2.2, update: ENT.B.lane, lane: lane, polite: true, honk: true, knock: 7 }); }); break;
-    case "vetschool": many(n0 * 0.9, dog); many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.glb("animated_woman", 1.75, new THREE.Group()), { speed: 1.1, r: 0.4, h: 1.75, clips: { walk: ["Walking"], run: ["Running"], idle: ["Idle"] }, knock: 3, canSteal: false }); }); many(n0 * 0.3, rooster); break;
+    case "vetschool": many(n0 * 0.9, dog); many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.glb("animated_woman", 1.75, new THREE.Group()), { speed: 1.1, r: 0.4, h: 1.75, clips: { walk: ["Walking"], run: ["Running"], idle: ["Idle"] }, knock: 3, canSteal: false, carFan: true }); }); many(n0 * 0.3, rooster); break;
     case "cabbage": many(n0 * 2, function(p) { prop(p, ENT.glb("cabbage", R(0.8, 1.6), typeof buildCabbage === "function" ? buildCabbage() : new THREE.Group()), 0.5, 1); }); many(n0 * 0.6, bunny); ENT.routeLanes(c, 1, function(lane) { ENT.add({ type: "tractor", mesh: ENT.glb("tractor", 2.4, typeof buildTractor === "function" ? buildTractor() : new THREE.Group()), x: lane.x0, z: lane.z0, r: 1.3, h: 2.4, speed: 2.4, update: ENT.B.lane, lane: lane, polite: true, honk: true, knock: 7 }); }); break;
     case "feet_bunnies": many(n0 * 0.8, bunny); for (var fi = 0; fi < Math.round((1 + idx * 0.25) * dens); fi++) { var fz = zones[Math.floor(srng() * zones.length)], fp = fz && spot(fz, 8); if (!fp) continue; var fm = ENT.M.foot(); var fe = ENT.add({ type: "foot", mesh: new THREE.Group(), foot: fm.root, shadow: fm.shadow, x: fp.x, z: fp.z, y: fp.y, r: 1.6, h: 2, update: ENT.B.stomper, freq: R(0.18, 0.28), phase: srng(), knock: 9, knockUp: 6 }); fe.mesh.add(fm.root); fe.mesh.add(fm.shadow); } break;
     case "socks_basket": ENT.socks(c, zones, idx, dens); many(n0 * 0.4, function(p) { prop(p, typeof buildLaundryBasket === "function" ? buildLaundryBasket() : new THREE.Group(), 1.1, 1.2); }); break;
@@ -827,7 +827,7 @@ ENT.spawnAll = function(h, spawns, idx) {
       many(1, function(p) { prop(p, ENT.M.lander(), 2.2, 4); });
       many(2, function(p) { prop(p, ENT.M.flag(), 0.1, 2.6, { solid: false }); });
       ENT.routeLanes(c, 1 + Math.floor(idx / 4), function(lane) { var rv = ENT.M.rover(); ENT.add({ type: "rover", mesh: rv, wheels: rv.userData.wheels, x: lane.x0, z: lane.z0, r: 1.3, h: 2, speed: 2.4, update: ENT.B.lane, lane: lane, polite: true, knock: 8 }); });
-      many(n0 * 0.3, function(p, z, i) { var keys = ["skin_trainer", "skin_citizen3", "skin_ninja"]; wanderer(p, z, ENT.M.npc(keys[i % 3]), { speed: 1, r: 0.4, h: 1.75, hop: 2.4, hopH: 1.2, clips: { walk: ["Walk"], run: ["Sprint"], idle: ["Idle"] } }); });
+      many(n0 * 0.3, function(p, z, i) { var keys = ["skin_farmer", "skin_worker", "skin_casual"]; wanderer(p, z, ENT.M.npc(keys[i % 3]), { speed: 1, r: 0.4, h: 1.75, hop: 2.4, hopH: 1.2, clips: { walk: ["Walk"], run: ["Sprint", "Run"], idle: ["Idle"] } }); });
       break;
     // ── Castle ──
     case "hogwarts": many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.M.knight(), { type: "knight", speed: 0.9, r: 0.45, h: 2.2, knock: 5, chase: 6 }); }); many(n0 * 0.3, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.M.ghost(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i, fade: true }); }); break;
@@ -900,8 +900,8 @@ ENT.club = function(c, spawns, idx, dens, th) {
     for (var k = 0; k < n; k++) {
       var a = srng() * 6.28, r = srng() * (P.size / 2 - 1.8), x = P.x + Math.cos(a) * r, z = P.z + Math.sin(a) * r;
       var robot = k % 2 === 0;
-      var mesh = robot ? ENT.glb("robot", 2.0, new THREE.Group()) : ENT.M.npc(["skin_crypto", "skin_trainer", "skin_citizen3", "skin_furry"][k % 4]);
-      ENT.add({ type: robot ? "robot" : "dancer", mesh: mesh, x: x, z: z, y: P.y, r: 0.5, h: 2, update: ENT.B.dancer, bounce: robot ? 0.35 : 0.12, spinOnBar: robot, squash: robot, clips: { a: ["Jump"], b: ["Sprint", "Walk"] }, knock: 5, yaw: srng() * 6 });
+      var mesh = robot ? ENT.glb("robot", 2.0, new THREE.Group()) : ENT.M.npc(["skin_punk", "skin_hoodie", "skin_casual", "skin_beach"][k % 4]);
+      ENT.add({ type: robot ? "robot" : "dancer", mesh: mesh, x: x, z: z, y: P.y, r: 0.5, h: 2, update: ENT.B.dancer, bounce: robot ? 0.35 : 0.12, spinOnBar: robot, squash: robot, clips: { a: ["Jump"], b: ["Sprint", "Run", "Walk"] }, knock: 5, yaw: srng() * 6 });
     }
     if (P.type === "dance" && (idx > 1 || dens > 1)) {
       var lz = ENT.M.laserRig(pal[i % pal.length], P.size * 0.9);
@@ -941,6 +941,8 @@ ENT.update = function(dt) {
     var o = ENT.list[i];
     o.t += dt;
     if (!o.update) continue;
+    if (o.seatedCar || o.toCar) continue;      // riding in / running to a car: the car logic moves them
+    if (o.fly && !(guest && ENT.isAI(o))) { ENT.flyStep(o, dt); continue; }
     if (guest && ENT.isAI(o)) { ENT.follow(o, dt); continue; }
     try { o.update(o, dt); }
     catch (e) { if (!o._err) console.error("entity " + o.type + ":", e); o._err = true; o.update = null; continue; }
@@ -961,6 +963,17 @@ ENT.update = function(dt) {
     }
   }
 };
+// Knocked flying (bat, poop army): ballistic arc, tumbling, then back to normal
+ENT.launch = function(o, vx, vy, vz) { o.fly = { vx: vx, vy: vy, vz: vz }; if (o.state) { if (ENT.carrying === o) ENT.dropDisc(o, true); o.state = null; } };
+ENT.flyStep = function(o, dt) {
+  var f = o.fly, c = ENT.course();
+  f.vy -= 22 * dt; o.x += f.vx * dt; o.y += f.vy * dt; o.z += f.vz * dt;
+  o.mesh.rotation.x += dt * 9; o.mesh.position.set(o.x, o.y, o.z); o.worldY = o.y;
+  var g = c.heightAt(o.x, o.z);
+  if (o.y <= g && f.vy < 0) { o.y = g; o.fly = null; o.mesh.rotation.x = 0; spawnParticleBurst(new THREE.Vector3(o.x, o.y + 0.3, o.z), new THREE.Color(0xffffff), 8); }
+  if (o.y < c.hazardAt(o.x, o.z).level - 4) { o.fly = null; o.x = o.home.x; o.z = o.home.z; o.y = c.heightAt(o.x, o.z); o.mesh.rotation.x = 0; }   // splashed: respawn at home
+};
+
 // Guest: apply a host snapshot
 ENT.applyNet = function(msg) {
   if (msg.h !== holeIdx || msg.n !== ENT.list.length) return;   // different hole, or still loading
@@ -973,6 +986,7 @@ ENT.applyNet = function(msg) {
 };
 // Guest: glide toward the latest snapshot and animate from the observed speed
 ENT.follow = function(o, dt) {
+  if (o.seatedCar) return;
   o.knockCD = (o.knockCD || 0) - dt;
   if (o.net) {
     var k = Math.min(1, dt * 9), ox = o.x, oz = o.z;

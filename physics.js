@@ -175,9 +175,12 @@ function switchAvatarAnim(avatarGroup, animName) {
   }
   if (!actionKey) {
     // Other rigs name their clips differently (Running, Walking, Gallop …)
-    var alias = { Sprint: ["running", "run", "gallop"], Walk: ["walking", "walk"], Grounded: ["idle"], Jump: ["jump"], Idle: ["idle"] }[resolved] || [];
+    var alias = { Sprint: ["running", "run", "gallop"], Walk: ["walking", "walk"], Grounded: ["idle"], Jump: ["jump", "run"], Idle: ["idle"], sit: ["sitidle", "sitting", "idle"], death: ["death", "die", "hitrecieve", "jump"], roll: ["roll", "jump"] }[resolved] || [];
     var ks2 = Object.keys(actions);
-    for (var ai = 0; ai < alias.length && !actionKey; ai++) actionKey = ks2.find(function(k) { return k.toLowerCase().split("|").pop() === alias[ai]; }) || ks2.find(function(k) { return k.toLowerCase().indexOf(alias[ai]) >= 0; }) || null;
+    // exact clip names first ("Run", "Man_Run"), only then partial matches ("RunningJump" must not win over "Run")
+    var seg = function(k) { return k.toLowerCase().split("|").pop(); };
+    for (var ai = 0; ai < alias.length && !actionKey; ai++) actionKey = ks2.find(function(k) { var s2 = seg(k); return s2 === alias[ai] || s2.slice(s2.lastIndexOf("_") + 1) === alias[ai]; }) || null;
+    for (var aj = 0; aj < alias.length && !actionKey; aj++) actionKey = ks2.find(function(k) { return seg(k).indexOf(alias[aj]) >= 0; }) || null;
   }
   if (!actionKey) return; // clip not in this model
 
@@ -186,7 +189,7 @@ function switchAvatarAnim(avatarGroup, animName) {
 
   var fromAction = current ? actions[current] : null;
   var toAction   = actions[actionKey];
-  var once = resolved === "Jump" || resolved === "Grounded";
+  var once = resolved === "Jump" || resolved === "Grounded" || resolved === "death" || resolved === "roll";
   toAction.reset().setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity).play().fadeIn(once ? 0.08 : 0.18);
   toAction.clampWhenFinished = once;
   if (fromAction) fromAction.fadeOut(0.18);
@@ -758,6 +761,7 @@ function _stepPhysicsFixed(dt) {
     discMesh.visible = true;
     discMesh.frustumCulled = false;
 
+    if (typeof BT !== "undefined") BT.discSweep(discPos, discVel, typeof PU !== "undefined" && PU.fireThrow);
     var bi = basketInteract(discPos, discVel, selectedDisc, true);
     if (bi === "score") { if (typeof shakeBasket === "function") shakeBasket(1.2); scored(); return; }
 
@@ -783,6 +787,10 @@ function _stepPhysicsFixed(dt) {
       outOfBounds(false);
       return;
     }
+
+    // Touching the landscape beyond the course → out of bounds
+    var _hc = h.course;
+    if (_hc && _hc.outer && discPos.y <= gnd + 0.08 && !_hc.inPlay(discPos.x, discPos.z)) { outOfBounds(false); return; }
 
     // On the ground: let it skid/roll a little, then call it landed
     if (discPos.y <= gnd + 0.08) {
@@ -901,7 +909,8 @@ function _aimCamPose(tp, tl) {
   var blen = Math.hypot(h.bx - discPos.x, h.bz - discPos.z);
   var camDist = Math.min(13, blen * 0.4 + 6.5) * (1 + throwPower * 0.12);
   var camGnd = terrainY(discPos.x - cDir.x * camDist, discPos.z - cDir.z * camDist, h, holeIdx);
-  var camY = Math.max(py + 4.6 + camDist * 0.18, camGnd + 3);
+  var lift = (4.6 + camDist * 0.18) * (1 + (typeof PL !== "undefined" ? PL.aimPitch : 0));   // right-drag raises / lowers the aiming view
+  var camY = Math.max(py + Math.max(1.6, lift), camGnd + 3);
   var C = h.course;
   if (C && C.ceiling) camY = Math.min(camY, py + 2.6);      // low ceilings: stay close over the shoulder
   tp.set(discPos.x - cDir.x * camDist, camY, discPos.z - cDir.z * camDist);
@@ -1024,6 +1033,9 @@ function updateCamera(dt) {
     if (phase === "AIMING") {
       _aimCamPose(tp, tl);
       spd = 0.09;
+    } else if (phase === "WALKING" && typeof VEH !== "undefined" && VEH.mySeat) {
+      VEH.cameraPose(tp, tl);
+      spd = 0.14;
     } else if (phase === "WALKING") {
       PL.cameraPose(tp, tl);
       spd = 0.16;

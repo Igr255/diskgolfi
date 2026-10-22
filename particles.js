@@ -176,8 +176,6 @@ function updateTrail(pos, isFlying) {
   trailGeometry.attributes.position.needsUpdate = true;
   var n = Math.min(trailPositions.length, TRAIL_LENGTH) - 1;
   trailGeometry.setDrawRange(0, Math.max(0, n) * 6);
-  const d = DISCS[selectedDisc];
-  if (d) trailMesh.material.uniforms.color.value.set(d.color);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -248,6 +248,8 @@ body.aiming #instr{display:none;}
   background:radial-gradient(circle at 34% 28%,rgba(255,255,255,.95) 0 9%,rgba(255,255,255,.35) 20%,rgba(255,255,255,0) 44%),var(--c);
   box-shadow:0 3px 8px rgba(0,20,40,.35),inset 0 -4px 7px rgba(0,0,0,.28),inset 0 0 0 1px rgba(255,255,255,.25);}
 .dopt.on .orb{transform:scale(1.14) translateY(-2px);}
+.orb.pic{background-image:var(--img) !important;background-size:118% !important;background-position:center !important;background-repeat:no-repeat !important;background-color:transparent !important;box-shadow:none !important;border-radius:0;width:38px;height:38px;filter:drop-shadow(0 3px 4px rgba(0,30,50,.35));}
+.dopt.on .orb.pic{transform:scale(1.18) translateY(-3px);}
 .dkey{position:absolute;bottom:3px;right:6px;font-size:9px;font-weight:800;color:var(--t3);}
 
 /* Actions (bottom-right) */
@@ -394,11 +396,23 @@ body.fp-active #fp-crosshair{display:block;}
   background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(234,247,255,.82));box-shadow:0 12px 30px rgba(8,48,80,.25);}
 
 /* 3D multiplayer lobby HUD */
-#lobby3d-hud{position:absolute;top:calc(18px + var(--safe-t));left:50%;transform:translateX(-50%);pointer-events:all;text-align:center;width:min(92vw,360px);}
-#lobby3d-hud .sheet{padding:16px 18px;}
-.lobby-meta{font-size:12px;font-weight:700;color:var(--ink2);margin-top:2px;}
+#lobby3d-hud{position:absolute;left:calc(18px + var(--safe-l));bottom:calc(18px + var(--safe-b));pointer-events:all;width:min(92vw,330px);}
+#lobby3d-hud .sheet{padding:16px 18px 14px;}
+.lb-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:10px;}
+#lobby3d-hud .code{font-size:34px;font-weight:900;letter-spacing:.12em;color:#15476a;cursor:pointer;line-height:1.05;}
+.lb-count{text-align:right;font-size:13px;font-weight:800;color:var(--ink2);}
+.lb-count b{font-size:28px;color:#15476a;}
+.lb-count span{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;}
+.lb-list{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.lb-p{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:12px;background:rgba(255,255,255,.65);border:1px solid rgba(18,70,104,.08);font-size:13px;}
+.lb-p .dot{width:10px;height:10px;border-radius:50%;flex:none;}
+.lb-p b{color:#15476a;}
+.lb-p span{margin-left:auto;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;}
+.lobby-meta{font-size:12px;font-weight:700;color:var(--ink2);margin:2px 0 4px;}
+.lobby-meta kbd{font-family:inherit;font-size:10px;font-weight:800;padding:1px 5px;border-radius:5px;background:#fff;border:1px solid rgba(18,70,104,.15);}
 .lobby-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px;}
-.lobby-name{position:absolute;pointer-events:none;transform:translateX(-50%);white-space:nowrap;display:none;padding:2px 9px;border-radius:999px;
+.lobby-name.me{background:rgba(255,255,255,.85);color:#15476a;}
+.lobby-name{position:absolute;pointer-events:none;transform:translate(-50%,-100%);white-space:nowrap;display:none;padding:3px 10px;border-radius:999px;
   font-size:12px;font-weight:800;color:#fff;background:rgba(16,48,72,.5);border:1px solid rgba(255,255,255,.35);}
 
 
@@ -419,7 +433,7 @@ body.walking #bottom,body.walking #disc-label{opacity:0;pointer-events:none;tran
 #bottom,#disc-label{transition:opacity .25s;}
 #prompt-toast{position:absolute;left:50%;top:calc(22% + var(--safe-t));transform:translate(-50%,-8px);padding:9px 18px;border-radius:999px;color:#fff;font-weight:800;font-size:14px;opacity:0;transition:opacity .3s,transform .3s;pointer-events:none;white-space:nowrap;}
 #prompt-toast.on{opacity:1;transform:translate(-50%,0);}
-#walk-pad,#jump-btn{display:none;}
+#walk-pad,#jump-btn,.act-btn{display:none;}
 @media (pointer:coarse){
   #walk-pad{display:block;position:absolute;left:calc(22px + var(--safe-l));bottom:calc(150px + var(--safe-b));width:118px;height:118px;border-radius:50%;
     background:radial-gradient(circle,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1.5px solid rgba(255,255,255,.4);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);pointer-events:all;touch-action:none;}
@@ -427,9 +441,86 @@ body.walking #bottom,body.walking #disc-label{opacity:0;pointer-events:none;tran
   body.walking #walk-pad{bottom:calc(30px + var(--safe-b));}
   body.walking #jump-btn{display:grid;place-items:center;position:absolute;right:calc(24px + var(--safe-r));bottom:calc(40px + var(--safe-b));width:84px;height:84px;border-radius:50%;pointer-events:all;touch-action:none;border:1.5px solid rgba(255,255,255,.45);}
   #jump-btn svg{width:34px;height:34px;fill:#fff;}
+  body.walking .act-btn{display:grid;place-items:center;position:absolute;width:58px;height:58px;border-radius:50%;pointer-events:all;touch-action:none;font-size:24px;border:1.5px solid rgba(255,255,255,.45);}
+  body.walking #dive-btn{right:calc(118px + var(--safe-r));bottom:calc(36px + var(--safe-b));}
+  body.walking #slap-btn{right:calc(30px + var(--safe-r));bottom:calc(134px + var(--safe-b));}
   body.walking #walk-hud{bottom:auto;top:calc(120px + var(--safe-t));}
   body.walking #actions{bottom:calc(140px + var(--safe-b));}
 }
+#veh-hint{position:absolute;left:50%;bottom:calc(76px + var(--safe-b));transform:translateX(-50%);height:42px;padding:0 18px;border-radius:999px;color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer;border:1.5px solid rgba(255,255,255,.5);pointer-events:all;z-index:5;}
+#veh-hint kbd{font-family:inherit;font-size:11px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.25);margin-right:2px;}
+#veh-hud{position:absolute;left:50%;top:calc(18px + var(--safe-t));transform:translateX(-50%);display:flex;align-items:baseline;gap:6px;padding:8px 18px;border-radius:999px;color:#fff;pointer-events:none;}
+#veh-hud b{font-size:30px;font-weight:900;font-variant-numeric:tabular-nums;}
+#veh-hud span{font-size:12px;font-weight:800;opacity:.8;}
+#veh-hud em{font-style:normal;font-size:12px;font-weight:700;opacity:.75;margin-left:10px;}
+body.driving #walk-hud .wh-keys{display:none;}
+@media (pointer:coarse){body.driving #jump-btn{display:grid;}}
+#pu-hud{position:absolute;left:calc(18px + var(--safe-l));top:calc(150px + var(--safe-t));display:flex;flex-direction:column;gap:6px;align-items:flex-start;pointer-events:none;}
+.pu-chip{position:relative;display:flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:999px;color:#fff;font-weight:800;font-size:13px;overflow:hidden;}
+.pu-chip span{font-size:17px;}
+.pu-chip i{position:absolute;left:0;bottom:0;height:3px;border-radius:2px;}
+.pu-item{pointer-events:all;display:flex;align-items:center;gap:7px;height:44px;padding:0 14px;border-radius:999px;color:#fff;font:inherit;font-weight:800;font-size:13px;cursor:pointer;border:1.5px solid rgba(255,255,255,.55);animation:puPulse 1.6s ease-in-out infinite;}
+.pu-item span{font-size:22px;}
+.pu-item kbd{font-family:inherit;font-size:11px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.25);}
+.pu-item em{font-style:normal;opacity:.75;font-size:11px;}
+@keyframes puPulse{50%{box-shadow:0 0 0 6px rgba(255,210,60,.25)}}
+@media (max-width:640px){#veh-hint{position:absolute;left:50%;bottom:calc(76px + var(--safe-b));transform:translateX(-50%);height:42px;padding:0 18px;border-radius:999px;color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer;border:1.5px solid rgba(255,255,255,.5);pointer-events:all;z-index:5;}
+#veh-hint kbd{font-family:inherit;font-size:11px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.25);margin-right:2px;}
+#veh-hud{position:absolute;left:50%;top:calc(18px + var(--safe-t));transform:translateX(-50%);display:flex;align-items:baseline;gap:6px;padding:8px 18px;border-radius:999px;color:#fff;pointer-events:none;}
+#veh-hud b{font-size:30px;font-weight:900;font-variant-numeric:tabular-nums;}
+#veh-hud span{font-size:12px;font-weight:800;opacity:.8;}
+#veh-hud em{font-style:normal;font-size:12px;font-weight:700;opacity:.75;margin-left:10px;}
+body.driving #walk-hud .wh-keys{display:none;}
+@media (pointer:coarse){body.driving #jump-btn{display:grid;}}
+#pu-hud{top:auto;bottom:calc(210px + var(--safe-b));}}
+/* ── Items bag ── */
+.pu-bag{pointer-events:all;display:flex;flex-direction:column;gap:5px;padding:7px;border-radius:16px;}
+.pu-slots{display:flex;gap:5px;}
+.pu-slot{position:relative;width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font:inherit;font-size:24px;cursor:pointer;color:#fff;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);padding:0;}
+.pu-slot.empty{background:rgba(0,0,0,.12);border-style:dashed;cursor:default;}
+.pu-slot.sel{border-color:#ffe14a;background:rgba(255,225,74,.22);box-shadow:0 0 0 3px rgba(255,225,74,.25);animation:puPulse 1.6s ease-in-out infinite;}
+.pu-slot em{position:absolute;right:3px;bottom:1px;font-style:normal;font-size:10px;font-weight:900;}
+.pu-name{display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;padding:0 3px;}
+.pu-name.dim{opacity:.8;font-weight:600;}
+.pu-name kbd{font-family:inherit;font-size:10px;padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.25);}
+/* ── Battle HUD ── */
+#bt-clock{position:absolute;left:50%;top:calc(84px + var(--safe-t));transform:translateX(-50%);display:none;align-items:baseline;gap:8px;padding:5px 16px;border-radius:999px;color:#fff;pointer-events:none;}
+#bt-clock span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.85;}
+#bt-clock b{font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;}
+#bt-clock.hot{background:rgba(255,90,60,.55);}
+#bt-clock.crit{animation:btCrit .5s ease-in-out infinite alternate;}
+@keyframes btCrit{to{transform:translateX(-50%) scale(1.12);background:rgba(255,40,40,.8);}}
+#bt-feed{position:absolute;right:calc(18px + var(--safe-r,0px));top:calc(232px + var(--safe-t));display:flex;flex-direction:column;gap:5px;align-items:flex-end;pointer-events:none;}
+.bt-feed-row{padding:5px 12px;border-radius:999px;color:#fff;font-size:12.5px;font-weight:600;transition:opacity .5s,transform .5s;animation:btIn .25s ease-out;}
+.bt-feed-row.out{opacity:0;transform:translateX(20px);}
+@keyframes btIn{from{opacity:0;transform:translateX(30px)}}
+.bt-pop{position:absolute;left:50%;top:38%;transform:translateX(-50%);color:#ffe14a;font-size:26px;font-weight:900;text-shadow:0 3px 10px rgba(0,0,0,.45);pointer-events:none;animation:btPop 1.6s ease-out forwards;white-space:nowrap;}
+@keyframes btPop{0%{opacity:0;transform:translate(-50%,10px) scale(.7)}15%{opacity:1;transform:translate(-50%,0) scale(1.1)}70%{opacity:1}100%{opacity:0;transform:translate(-50%,-40px)}}
+#bt-koflash{position:fixed;inset:0;pointer-events:none;z-index:40;opacity:0;background:radial-gradient(circle,rgba(255,255,255,0) 40%,rgba(255,60,60,.55));}
+#bt-koflash.on{animation:btFlash .7s ease-out;}
+@keyframes btFlash{0%{opacity:1}100%{opacity:0}}
+#bt-tally{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none;z-index:30;}
+#bt-tally .sheet{min-width:min(560px,92vw);max-width:92vw;padding:16px 18px;border-radius:22px;color:#fff;background:rgba(12,16,34,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.18);box-shadow:0 18px 50px rgba(0,0,0,.35);}
+#bt-tally.static .bt-row{animation:none;opacity:1;}
+body.bt-done #relief-btn{display:none;}
+#bt-tally h3{margin:0 0 10px;font-size:18px;font-weight:900;text-align:center;}
+.bt-row{display:grid;grid-template-columns:24px 92px 1fr 52px 56px;gap:8px;align-items:center;padding:7px 8px;border-radius:12px;opacity:0;animation:btRow .4s ease-out forwards;animation-delay:var(--d);}
+.bt-row.me{background:rgba(255,255,255,.14);}
+.bt-row .rk{font-weight:900;opacity:.7;}
+.bt-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.bt-row .chips{display:flex;flex-wrap:wrap;gap:4px;}
+.bt-row .chips i{font-style:normal;font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.16);}
+.bt-row .chips i em{font-style:normal;color:#ffe14a;}
+.bt-row .chips i.none{opacity:.6;}
+.bt-row .ht{font-weight:900;color:#ffe14a;text-align:right;}
+.bt-row .mt{font-size:18px;font-weight:900;text-align:right;}
+@keyframes btRow{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.lb-mode{display:flex;gap:6px;margin:8px 0 2px;}
+.lb-mode button{flex:1;padding:8px 6px;border-radius:12px;border:1.5px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font:inherit;font-weight:800;font-size:12px;cursor:pointer;pointer-events:all;}
+.lb-mode button.on{background:rgba(255,225,74,.25);border-color:#ffe14a;}
+.lb-mode button:disabled{cursor:default;opacity:.8;}
+.lb-k{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;opacity:.75;margin-top:6px;}
+@media (max-width:640px){#bt-feed{top:auto;bottom:calc(270px + var(--safe-b));right:10px;} #bt-clock{top:calc(70px + var(--safe-t));} .bt-row{grid-template-columns:20px 70px 1fr 40px 44px;font-size:12px;}}
 .hb-mods{display:flex;gap:6px;justify-content:center;margin-top:10px;flex-wrap:wrap;}
 .hb-mod{font-size:13px;font-weight:800;color:#fff;padding:5px 12px;border-radius:999px;background:rgba(255,120,90,.32);border:1px solid rgba(255,255,255,.45);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);text-shadow:0 1px 3px rgba(0,0,0,.25);}
@@ -656,11 +747,13 @@ body.walking #bottom,body.walking #disc-label{opacity:0;pointer-events:none;tran
 
     <!-- Walking to the disc -->
     <div id="walk-hud">
-      <div class="wh-chip glass"><span class="wh-dot"></span><span class="wh-txt">Walk to your disc</span><b id="walk-dist">—</b><span class="wh-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump</span></div>
+      <div class="wh-chip glass"><span class="wh-dot"></span><span class="wh-txt">Walk to your disc</span><b id="walk-dist">—</b><span class="wh-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>V</kbd> dive</span></div>
       <button id="relief-btn" class="glass" onclick="takeRelief()" title="Can't reach it? Take a penalty stroke and replay from your last lie">Take relief <span>+1</span></button>
     </div>
     <div id="walk-pad"><div id="walk-knob"></div></div>
     <button id="jump-btn" class="glass" aria-label="Jump"><svg viewBox="0 0 24 24"><path d="M12 4 5 12h4.5v7h5v-7H19z"/></svg></button>
+    <button id="dive-btn" class="glass act-btn" aria-label="Dive" onpointerdown="BT.dive()">🤸</button>
+    <button id="slap-btn" class="glass act-btn" aria-label="Slap" onpointerdown="if(_punchCooldown<=0&&mpMode){_punchCooldown=1.2;_doPunch();}">✋</button>
 
     <!-- Bottom dock -->
     <div id="bottom">
@@ -710,11 +803,14 @@ body.walking #bottom,body.walking #disc-label{opacity:0;pointer-events:none;tran
       <tr><td><kbd>1</kbd>–<kbd>8</kbd></td><td>Choose a disc: putters near the basket, drivers for distance</td></tr>
       <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Walk to your disc (camera-relative) · <kbd>A</kbd>/<kbd>D</kbd> nudge the disc mid-flight</td></tr>
       <tr><td><kbd>Shift</kbd> · <kbd>Space</kbd></td><td>Sprint · jump (hold for a higher jump)</td></tr>
-      <tr><td>Drag · wheel</td><td>While walking: orbit and zoom the camera</td></tr>
+      <tr><td>Right-drag · wheel</td><td>Look around (walking, driving and aiming) · zoom</td></tr>
       <tr><td>Relief</td><td>Can't reach your disc? Take a penalty stroke and replay from your last lie</td></tr>
       <tr><td><kbd>C</kbd> · <kbd>M</kbd></td><td>First-person view · hide the map</td></tr>
-      <tr><td><kbd>R</kbd></td><td>Bonk a nearby player (multiplayer)</td></tr>
+      <tr><td><kbd>R</kbd> · <kbd>V</kbd></td><td>Slap a nearby player (knocks them out) · dive / roll to dodge hits</td></tr>
+      <tr><td><kbd>F</kbd> · <kbd>G</kbd></td><td>Use your item · switch item (carry up to 3 from the purple <b>?</b> bags)</td></tr>
     </table>
+    <div class="help-tip" style="font-size:11px;opacity:.8">Characters: Quaternius (CC0) · "Suit" by Quaternius and "Character Base" by madtrollstudio, both CC-BY 3.0 via poly.pizza.</div>
+    <div class="help-tip"><b>Battle mode</b> (multiplayer): everyone plays at once. Points for finishing order, birdies, long makes, speedruns and knockouts. Once someone holes out the rest have 40 s to finish!</div>
     <div class="help-tip">From hole 3 on, each hole adds a twist — rising water, crumbling platforms, critters that steal your disc, failing lights… The hole banner tells you which. The dotted arc previews your throw and the ring shows where it lands. The green band on the power meter is the disc's sweet spot. Clip the band or rim and the basket spits the disc back out.</div>
   </div>
 
@@ -727,27 +823,30 @@ body.walking #bottom,body.walking #disc-label{opacity:0;pointer-events:none;tran
     };
     window._loadedScripts = [];
   </script>
-  <script src="graphics.js?v=26102102"></script>
-  <script src="config.js?v=26102102"></script>
-  <script src="rng.js?v=26102102"></script>
-  <script src="audio.js?v=26102102"></script>
-  <script src="weather.js?v=26102102"></script>
-  <script src="particles.js?v=26102102"></script>
-  <script src="powerups.js?v=26102102"></script>
-  <script src="terrain.js?v=26102102"></script>
-  <script src="obstacles.js?v=26102102"></script>
-  <script src="physics.js?v=26102102"></script>
-  <script src="cosmetics.js?v=26102102"></script>
-  <script src="course.js?v=26102102"></script>
-  <script src="levels.js?v=26102102"></script>
-  <script src="levels2.js?v=26102102"></script>
-  <script src="levels3.js?v=26102102"></script>
-  <script src="entities.js?v=26102102"></script>
-  <script src="player.js?v=26102102"></script>
-  <script src="ui.js?v=26102102"></script>
-  <script src="multiplayer.js?v=26102102"></script>
-  <script src="game.js?v=26102102"></script>
-  <script src="profile.js?v=26102102"></script>
+  <script src="graphics.js?v=26102303"></script>
+  <script src="config.js?v=26102303"></script>
+  <script src="rng.js?v=26102303"></script>
+  <script src="audio.js?v=26102303"></script>
+  <script src="weather.js?v=26102303"></script>
+  <script src="particles.js?v=26102303"></script>
+  <script src="powerups.js?v=26102303"></script>
+  <script src="battle.js?v=26102303"></script>
+  <script src="terrain.js?v=26102303"></script>
+  <script src="obstacles.js?v=26102303"></script>
+  <script src="physics.js?v=26102303"></script>
+  <script src="cosmetics.js?v=26102303"></script>
+  <script src="course.js?v=26102303"></script>
+  <script src="levels.js?v=26102303"></script>
+  <script src="levels2.js?v=26102303"></script>
+  <script src="levels3.js?v=26102303"></script>
+  <script src="entities.js?v=26102303"></script>
+  <script src="player.js?v=26102303"></script>
+  <script src="vehicle.js?v=26102303"></script>
+  <script src="world.js?v=26102303"></script>
+  <script src="ui.js?v=26102303"></script>
+  <script src="multiplayer.js?v=26102303"></script>
+  <script src="game.js?v=26102303"></script>
+  <script src="profile.js?v=26102303"></script>
 
 
   <script>

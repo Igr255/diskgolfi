@@ -231,6 +231,85 @@ var _INS = {
     o.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(amp); amp.connect(ch.input);
   },
 
+  // ── French house kit (disco map) ──
+  // Chopped disco chord stab: detuned saws + square sub, snappy filter envelope
+  stab: function(ch, t, notes, dur, vel) {
+    var ctx = ch.ctx, end = t + dur + 0.25;
+    var lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 2.2;
+    lp.frequency.setValueAtTime(5200, t); lp.frequency.exponentialRampToValueAtTime(1100, t + Math.max(0.08, dur));
+    var amp = this._gain(ctx);
+    amp.gain.setValueAtTime(0, t); amp.gain.linearRampToValueAtTime(0.075 * vel, t + 0.004);
+    amp.gain.setValueAtTime(0.06 * vel, t + dur); amp.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
+    var self = this;
+    notes.forEach(function(m) {
+      [-9, 9].forEach(function(c) { var o = self._osc(ctx, "sawtooth", _mtof(m), t, end); o.detune.value = c; o.connect(lp); });
+      var q = self._osc(ctx, "square", _mtof(m) / 2, t, end), qg = self._gain(ctx, 0.35); q.connect(qg); qg.connect(lp);
+    });
+    lp.connect(amp); amp.connect(ch.input);
+  },
+  // Squelchy funk bass: square + saw through a resonant lowpass that snaps shut
+  funkbass: function(ch, t, m, dur, vel) {
+    var ctx = ch.ctx, f = _mtof(m), end = t + dur + 0.2;
+    var o1 = this._osc(ctx, "square", f, t, end), o2 = this._osc(ctx, "sawtooth", f, t, end); o2.detune.value = 7;
+    var sub = this._osc(ctx, "sine", f, t, end), sg = this._gain(ctx, 0.9);
+    var lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 9;
+    lp.frequency.setValueAtTime(260 + 2400 * vel, t); lp.frequency.exponentialRampToValueAtTime(240, t + 0.17);
+    var amp = this._gain(ctx);
+    amp.gain.setValueAtTime(0, t); amp.gain.linearRampToValueAtTime(0.2 * vel, t + 0.006);
+    amp.gain.setValueAtTime(0.16 * vel, t + dur * 0.8); amp.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.08);
+    var mix = this._gain(ctx, 0.5); o1.connect(mix); o2.connect(mix); mix.connect(lp); lp.connect(amp);
+    sub.connect(sg); sg.connect(amp); amp.connect(ch.input);
+  },
+  // Robot talk-box lead: buzzy oscillators gliding between notes, sung through
+  // three formant filters that open from "oo" to "ah" on every note (the "wah")
+  talkbox: function(ch, t, m, dur, vel, from) {
+    var ctx = ch.ctx, f = _mtof(m), end = t + dur + 0.25;
+    var src = this._gain(ctx, 1), self = this;
+    [["sawtooth", -6], ["sawtooth", 6], ["square", 0]].forEach(function(s) {
+      var o = self._osc(ctx, s[0], from ? _mtof(from) : f, t, end); o.detune.value = s[1];
+      if (from && from !== m) o.frequency.exponentialRampToValueAtTime(f, t + 0.055);
+      var vib = self._osc(ctx, "sine", 5.6, t, end), vg = self._gain(ctx);
+      vg.gain.setValueAtTime(0, t); vg.gain.linearRampToValueAtTime(f * 0.009, t + Math.min(0.35, dur)); vib.connect(vg); vg.connect(o.frequency);
+      var g = self._gain(ctx, s[0] === "square" ? 0.4 : 0.6); o.connect(g); g.connect(src);
+    });
+    var out = this._gain(ctx, 1);
+    var open = Math.min(0.12, dur * 0.5);
+    [[320, 740, 9, 1], [800, 1180, 10, 0.75], [2250, 2500, 12, 0.35]].forEach(function(F) {
+      var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = F[2];
+      bp.frequency.setValueAtTime(F[0], t); bp.frequency.exponentialRampToValueAtTime(F[1], t + open);
+      bp.frequency.setTargetAtTime(F[0] * 1.15, t + dur * 0.7, 0.08);
+      var fg = self._gain(ctx, F[3] * 2.6); src.connect(bp); bp.connect(fg); fg.connect(out);
+    });
+    var amp = this._gain(ctx);
+    amp.gain.setValueAtTime(0, t); amp.gain.linearRampToValueAtTime(0.2 * vel, t + 0.015);
+    amp.gain.setValueAtTime(0.18 * vel, t + dur); amp.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.1);
+    out.connect(amp); amp.connect(ch.input);
+  },
+  // Short square blip for the robotic 16th arpeggio
+  chip: function(ch, t, m, dur, vel) {
+    var ctx = ch.ctx, o = this._osc(ctx, "square", _mtof(m), t, t + 0.2);
+    var lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3600;
+    var g = this._gain(ctx); g.gain.setValueAtTime(0.2 * vel, t); g.gain.exponentialRampToValueAtTime(0.0001, t + Math.min(0.16, dur * 1.2));
+    o.connect(lp); lp.connect(g); g.connect(ch.input);
+  },
+  // Club kick: pitch-dropping body + a click so it cuts through
+  hkick: function(ch, t, vel) {
+    var ctx = ch.ctx, o = this._osc(ctx, "sine", 160, t, t + 0.5), g = this._gain(ctx);
+    o.frequency.exponentialRampToValueAtTime(52, t + 0.09); o.frequency.exponentialRampToValueAtTime(42, t + 0.4);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.95 * vel, t + 0.003); g.gain.setValueAtTime(0.9 * vel, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    o.connect(g); g.connect(ch.input);
+    this._noiseHit(ch, t, "highpass", 3000, 0.7, 0.12 * vel, 0.012);
+  },
+  // White-noise riser into a drop, and a crash on the downbeat
+  riser: function(ch, t, dur) {
+    var ctx = ch.ctx, n = ctx.createBufferSource(); n.buffer = ch.G.white; n.loop = true;
+    var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(350, t); bp.frequency.exponentialRampToValueAtTime(9000, t + dur);
+    var g = this._gain(ctx); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.13, t + dur); g.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+    n.connect(bp); bp.connect(g); g.connect(ch.input); n.start(t); n.stop(t + dur + 0.05);
+  },
+  crash: function(ch, t, vel) { this._noiseHit(ch, t, "highpass", 4800, 0.4, 0.16 * vel, 1.8); this._noiseHit(ch, t, "bandpass", 9000, 0.8, 0.07 * vel, 2.4); },
+
   // ── Soft drums ──
   kick: function(ch, t, vel) {
     var ctx = ch.ctx, o = this._osc(ctx, "sine", 120, t, t + 0.45), g = this._gain(ctx);
@@ -325,6 +404,9 @@ var _STYLES = {
   blocks:   { bpm: 68, swing: 0, root: 40, keys: [0, 7], mode: "lydian", progs: [[0,3,5,4],[0,4,5,3],[3,0,4,5]], lead: "ep", comp: "ep", drums: null, arr: "sparse", bells: "bell", pad: 800, softKeys: true, chordBars: 2, verb: 1.3, gain: 1.0 },
   // Neon / city / geometry — chill synthwave: saw pad, delayed plucks
   synth:    { bpm: 96, swing: 0, root: 38, keys: [0, 5, 7], mode: "minor", progs: [[0,5,2,6],[0,3,5,6],[5,6,0,0],[0,6,5,6]], lead: "pluck", comp: "pluck", drums: "four", arr: "groove", bells: "bell", pad: 1400, arpOn: true, gain: 1.15 },
+  // Disco map — French house: four-on-the-floor, sidechain pump, filtered disco
+  // stabs through a phaser, squelchy funk bass, robot talk-box hooks, risers and drops
+  house:    { bpm: 122, swing: 0, root: 40, keys: [0, 2, 5, 7], mode: "dorian", progs: [[0,6,5,4],[0,3,6,4],[0,5,3,4],[0,6,3,4]], house: true, gain: 0.8 },
   // Disco — dorian funk, offbeat EP stabs, octave bass
   disco:    { bpm: 112, swing: 0, root: 38, keys: [0, 5], mode: "dorian", progs: [[0,3,0,3],[0,4,3,4],[0,1,2,3]], lead: "pluck", comp: "ep", drums: "disco", arr: "groove", bells: "bell", pad: 1300, bassPat: "octave", compPat: "offbeat", gain: 0.65 },
   // Office — lo-fi jazz: ii–V–I with 9ths, brushes
@@ -342,7 +424,7 @@ var _THEME_STYLE = {
   mountains: "alpine", grandcanyon: "alpine", winter: "winter", moon: "space",
   eerie: "dusk", hogwarts: "waltz", backrooms: "liminal", poolrooms: "liminal",
   neon: "synth", city: "synth", geometry_dash: "synth", sixtyseven: "synth", map67: "synth",
-  disco: "disco", office: "lofijazz",
+  disco: "house", office: "lofijazz",
   terrifying: "storm", screaming_mamamia: "storm", tornado: "storm",
 };
 
@@ -395,15 +477,17 @@ function _Song(G, styleName, seed, startTime, opts) {
     arp:   this._channel(0.34, -0.25, 0.25 * verbK, 0.35),
     drums: this._channel(0.5, 0, 0.08, 0),
   };
+  if (st.house) this._houseRig();
   // Tempo-synced delay: dotted eighth
   var dt = this.spb * 0.75;
   G.delayL.delayTime.setValueAtTime(dt, startTime); G.delayR.delayTime.setValueAtTime(dt, startTime);
 }
 
-_Song.prototype._channel = function(vol, pan, verb, dly) {
+_Song.prototype._channel = function(vol, pan, verb, dly, dest) {
   var ctx = this.ctx, G = this.G, input = ctx.createGain(); input.gain.value = vol;
   var p = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-  if (p) { p.pan.value = pan; input.connect(p); p.connect(this.out); } else input.connect(this.out);
+  dest = dest || this.out;
+  if (p) { p.pan.value = pan; input.connect(p); p.connect(dest); } else input.connect(dest);
   if (verb) { var v = ctx.createGain(); v.gain.value = verb; input.connect(v); v.connect(G.musicVerb); this._verbSends = (this._verbSends || []).concat([v]); }
   if (dly) { var d = ctx.createGain(); d.gain.value = dly; input.connect(d); d.connect(G.delayIn); this._dlySends = (this._dlySends || []).concat([d]); }
   return { ctx: ctx, input: input, G: G };
@@ -480,6 +564,7 @@ _Song.prototype.scheduleUntil = function(tEnd) {
 };
 
 _Song.prototype.scheduleBar = function(bar, t0) {
+  if (this.st.house) return this._houseBar(bar, t0);
   var st = this.st, spb = this.spb, meter = this.meter, rng = this.rng, self = this;
   var sec = this.section(bar), secIdx = Math.floor(bar / 8) + (this.skipIntro ? 1 : 0);
   var chordIdx = Math.floor(bar / this.chordBars) % this.prog.length;
@@ -568,10 +653,163 @@ _Song.prototype.scheduleBar = function(bar, t0) {
 };
 
 _Song.prototype.fadeOut = function(t, dur) {
+  (this._lfos || []).forEach(function(o) { try { o.stop(t + dur + 0.5); } catch (e) {} });
   var g = this.out.gain;
   g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0.0001, t + dur);
   var out = this.out;
   setTimeout(function() { try { out.disconnect(); } catch (e) {} }, (dur + 6) * 1000);
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── FRENCH HOUSE (disco map) ─────────────────────────────────────────────────
+// Its own arranger: 8-bar sections that build, drop and break down, with the
+// whole mix pumping against the kick and the disco stabs filtered open and shut.
+// ══════════════════════════════════════════════════════════════════════════════
+var _HOUSE_ARR = [
+  { name: "intro", drums: "intro", stabs: 1, sweep: [280, 900] },
+  { name: "build", drums: "build", stabs: 1, bass: 1, sweep: [900, 6000], riser: 1 },
+  { name: "drop", drums: "full", stabs: 1, bass: 1, lead: "A", sweep: [9000, 9000], crash: 1 },
+  { name: "groove", drums: "full", stabs: 1, bass: 1, lead: "B", arp: 1, sweep: [9000, 9000] },
+  { name: "break", drums: "break", stabs: 1, pad: 1, lead: "A", sweep: [5000, 420], riser: 1 },
+  { name: "drop2", drums: "full", stabs: 1, bass: 1, lead: "B", arp: 1, sweep: [9000, 9000], crash: 1 },
+];
+
+_Song.prototype._houseRig = function() {
+  var ctx = this.ctx, self = this;
+  // Sidechain: everything except the drums runs through one gain that ducks on each kick
+  this.pump = ctx.createGain(); this.pump.connect(this.out);
+  // The disco stabs: sweeping lowpass → phaser (4 allpass stages on a slow LFO) → pump
+  this.sweep = ctx.createBiquadFilter(); this.sweep.type = "lowpass"; this.sweep.Q.value = 5; this.sweep.frequency.value = 600;
+  var dry = ctx.createGain(); dry.gain.value = 0.7; this.sweep.connect(dry); dry.connect(this.pump);
+  var lfo = ctx.createOscillator(); lfo.frequency.value = 0.18; var depth = ctx.createGain(); depth.gain.value = 650; lfo.connect(depth);
+  var node = this.sweep;
+  for (var i = 0; i < 4; i++) { var ap = ctx.createBiquadFilter(); ap.type = "allpass"; ap.frequency.value = 900; ap.Q.value = 0.6; depth.connect(ap.frequency); node.connect(ap); node = ap; }
+  var wet = ctx.createGain(); wet.gain.value = 0.6; node.connect(wet); wet.connect(this.pump);
+  lfo.start(); this._lfos = [lfo];
+  this.ch = {
+    keys:  this._channel(0.95, -0.12, 0.16, 0.1, this.sweep),
+    pad:   this._channel(0.55, 0, 0.4, 0, this.pump),
+    bass:  this._channel(0.95, 0, 0.0, 0, this.pump),
+    mel:   this._channel(0.8, 0.1, 0.2, 0.3, this.pump),
+    arp:   this._channel(0.8, -0.3, 0.18, 0.3, this.pump),
+    drums: this._channel(0.62, 0, 0.04, 0),
+    fx:    this._channel(0.5, 0, 0.5, 0.1),
+  };
+  // One groove per song: stab rhythm, bass line and lead rhythms (16th-note steps)
+  var rng = this.rng;
+  this.stabPat = _pick(rng, [
+    [[2, 2], [6, 1], [8, 2], [11, 1], [14, 2]],
+    [[0, 3], [3, 1], [6, 2], [10, 2], [12, 1], [14, 1]],
+    [[2, 1], [4, 2], [7, 1], [10, 3], [14, 2]],
+    [[2, 2], [5, 1], [7, 2], [10, 1], [12, 3]],
+  ]);
+  this.bassPat = _pick(rng, [   // [step, length, interval, velocity]
+    [[0, 2, 0, 1], [3, 1, 0, .7], [6, 1, 12, .8], [8, 2, 0, .95], [10, 1, 7, .7], [11, 1, 12, .75], [14, 2, 10, .8]],
+    [[0, 1, 0, 1], [2, 1, 12, .7], [4, 2, 0, .85], [7, 1, 10, .7], [8, 1, 0, .95], [10, 1, 12, .75], [12, 2, 7, .8], [15, 1, 12, .6]],
+    [[0, 3, 0, 1], [3, 1, 12, .75], [6, 2, 0, .8], [9, 1, 7, .7], [10, 2, 10, .8], [13, 1, 12, .7], [14, 2, 0, .85]],
+  ]);
+  this.leadRhythms = { A: _pick(rng, _HOUSE_RHY), B: _pick(rng, _HOUSE_RHY) };
+  this.riffs = {};
+};
+// Two-bar talk-box rhythms: [step, length] on a 32-step grid
+var _HOUSE_RHY = [
+  [[0, 3], [3, 3], [6, 2], [8, 4], [14, 2], [16, 3], [19, 3], [22, 2], [24, 6]],
+  [[0, 2], [2, 2], [4, 4], [10, 2], [12, 4], [16, 2], [18, 2], [20, 4], [26, 6]],
+  [[2, 2], [4, 2], [6, 4], [12, 2], [14, 2], [18, 2], [20, 2], [22, 4], [28, 4]],
+  [[0, 4], [6, 2], [8, 2], [10, 4], [16, 4], [22, 2], [24, 2], [26, 6]],
+];
+
+// A 4-bar hook: a 2-bar call, then the same call with a new ending that lands on the chord
+_Song.prototype._houseRiff = function(key) {
+  if (this.riffs[key]) return this.riffs[key];
+  var rng = _aRng(((this.root * 7717 + key.charCodeAt(0) * 131) ^ (this.rng() * 1e9)) >>> 0);
+  var lo = this.root + 24, hi = lo + 15, pool = [];
+  for (var m = lo; m <= hi; m++) { var pc = ((m - this.root) % 12 + 12) % 12; if (this.scale.indexOf(pc) >= 0) pool.push(m); }
+  var rhy = this.leadRhythms[key], self = this;
+  function line(bars, endOn) {
+    var out = [], cur = pool[Math.floor(pool.length / 2) - 1];
+    rhy.forEach(function(r, i) {
+      var bar = bars[0] + Math.floor(r[0] / 16), chord = self.chord(self.prog[bar % self.prog.length]);
+      var pcs = chord.map(function(x) { return ((x - self.root) % 12 + 12) % 12; });
+      var long = r[1] >= 4, last = i === rhy.length - 1;
+      var cands = pool.filter(function(x) { return Math.abs(x - cur) <= (long ? 5 : 3); });
+      if (long || last) { var ct = cands.filter(function(x) { return pcs.indexOf(((x - self.root) % 12 + 12) % 12) >= 0; }); if (ct.length) cands = ct; }
+      if (last && endOn != null) { var tgt = pool.filter(function(x) { return ((x - self.root) % 12 + 12) % 12 === pcs[0]; }); if (tgt.length) cands = tgt; }
+      cands.sort(function(a, b) { return Math.abs(a - cur) - Math.abs(b - cur) + (rng() - 0.5) * 2.5; });
+      cur = cands[Math.floor(rng() * Math.min(2, cands.length))] || cur;
+      out.push({ step: r[0] + bars[0] * 16, len: r[1], m: cur });
+    });
+    return out;
+  }
+  var call = line([0, 1]), answer = line([2, 3], true);
+  // the answer repeats the call's first half so the hook sticks
+  var half = Math.floor(call.length / 2);
+  for (var i = 0; i < half && i < answer.length; i++) answer[i].m = call[i].m;
+  return (this.riffs[key] = call.concat(answer));
+};
+
+_Song.prototype._houseBar = function(bar, t0) {
+  var spb = this.spb, ch = this.ch;
+  var sIdx = Math.floor(bar / 8) + (this.skipIntro ? 1 : 0), A = _HOUSE_ARR;
+  var sec = sIdx < A.length ? A[sIdx] : A[1 + ((sIdx - 1) % (A.length - 1))];
+  var inSec = bar % 8, barLen = 4 * spb, s16 = spb / 4;
+  var chord = this.chord(this.prog[bar % this.prog.length]);
+  function T(step) { return t0 + step * s16; }
+
+  // Filter sweep across the section (exponential, so it opens musically)
+  var f0 = sec.sweep[0], f1 = sec.sweep[1], k0 = inSec / 8, k1 = (inSec + 1) / 8;
+  var fa = f0 * Math.pow(f1 / f0, k0), fb = f0 * Math.pow(f1 / f0, k1);
+  this.sweep.frequency.setValueAtTime(fa, t0); this.sweep.frequency.exponentialRampToValueAtTime(fb, t0 + barLen);
+
+  // Drums + sidechain pump
+  var kick = sec.drums === "intro" || sec.drums === "build" || sec.drums === "full";
+  for (var st = 0; st < 16; st++) {
+    var t = T(st);
+    if (kick && st % 4 === 0) {
+      _INS.hkick(ch.drums, t, st === 0 ? 1 : 0.92);
+      var pg = this.pump.gain; pg.setValueAtTime(1, t - 0.002); pg.linearRampToValueAtTime(0.28, t + 0.012); pg.setTargetAtTime(1, t + 0.05, 0.075);
+    }
+    if (sec.drums !== "break" || inSec >= 4) {
+      if (st % 4 === 2) _INS.hat(ch.drums, t, sec.drums === "intro" ? 0.55 : 0.8, true);                 // offbeat open hat
+      if (sec.drums !== "intro" && st % 2 === 1) _INS.hat(ch.drums, t, 0.28 + (st % 4 === 3 ? 0.1 : 0)); // 16th shuffle
+    }
+    if ((sec.drums === "full" || (sec.drums === "build" && inSec >= 4)) && (st === 4 || st === 12)) _INS.clap(ch.drums, t, 0.95);
+    if (sec.drums === "break" && st === 12 && inSec % 2 === 1) _INS.clap(ch.drums, t, 0.6);
+  }
+  // Snare roll into the next section
+  if (inSec === 7 && (sec.riser || sec.drums === "full")) {
+    for (var r = 8; r < 16; r++) _INS.snare(ch.drums, T(r), 0.3 + (r - 8) * 0.08);
+  }
+  if (sec.crash && inSec === 0) _INS.crash(ch.fx, t0, 1);
+  if (sec.riser && inSec === 6) _INS.riser(ch.fx, t0, barLen * 2);
+
+  // Chopped disco stabs (bar 4 of every 4 varies the chop)
+  if (sec.stabs) {
+    var sv = _voice(chord.slice(0, 4), this.root + 17, this.root + 31);
+    var pat = bar % 4 === 3 ? this.stabPat.concat([[15, 1]]) : this.stabPat;
+    pat.forEach(function(p) { _INS.stab(ch.keys, T(p[0]), sv, p[1] * s16 * 0.9, p[0] % 4 === 2 ? 1 : 0.85); });
+  }
+  // Bass (drops out on the last half-bar of a build for tension)
+  if (sec.bass && !(sec.riser && inSec === 7)) {
+    var rt = chord[0]; while (rt > this.root + 4) rt -= 12; while (rt < this.root - 8) rt += 12;
+    this.bassPat.forEach(function(p) { _INS.funkbass(ch.bass, T(p[0]), rt + p[2], p[1] * s16 * 0.92, p[3]); });
+  }
+  // Pad bed in the breakdown
+  if (sec.pad && bar % 2 === 0) _INS.pad(ch.pad, t0, _voice(chord.concat([chord[0] + 14]), this.root + 19, this.root + 34), barLen * 2 - 0.05, 0.9, 1800);
+  // Talk-box hook (4-bar riff; the breakdown sings it softer)
+  if (sec.lead && !(sec.riser && inSec >= 6)) {
+    var riff = this._houseRiff(sec.lead), b4 = bar % 4, prev = null;
+    riff.forEach(function(n) {
+      var nb = Math.floor(n.step / 16);
+      if (nb === b4) _INS.talkbox(ch.mel, T(n.step % 16), n.m, n.len * s16 * 0.94, sec.drums === "break" ? 0.65 : 0.9, prev);
+      prev = n.m;
+    });
+  }
+  // Robotic 16th arpeggio
+  if (sec.arp) {
+    var av = _voice(chord.concat([chord[0] + 12]), this.root + 36, this.root + 52), order = [0, 2, 1, 3, 4, 3, 1, 2];
+    for (var a = 0; a < 16; a++) _INS.chip(ch.arp, T(a), av[order[a % 8] % av.length], s16, a % 4 === 0 ? 0.9 : 0.55);
+  }
 };
 
 // ══════════════════════════════════════════════════════════════════════════════

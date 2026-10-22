@@ -38,6 +38,7 @@ var PL = {
 
   // Movement intent in world space from keyboard / joystick, relative to the camera
   _input: function() {
+    if (typeof BT !== "undefined" && BT.locked()) return { x: 0, z: 0, mag: 0, run: false };
     var f = 0, r = 0;
     if (keys.w || keys.W) f += 1;
     if (keys.s || keys.S) f -= 1;
@@ -100,9 +101,10 @@ var PL = {
     if (sup && sup.solid && sup.solid.mover) { p.x += sup.solid.dx || 0; p.z += sup.solid.dz || 0; p.y += sup.solid.dy || 0; }
     // Input → horizontal velocity (snappy on the ground, floaty in the air)
     var inp = this._input();
-    var spd = (inp.run ? this.RUN : this.WALK) * (inp.mag || 0);
+    var spd = (inp.run ? this.RUN : this.WALK) * (inp.mag || 0) * (typeof PU !== "undefined" ? PU.speedMul() : 1);
     var tx = inp.x * spd, tz = inp.z * spd;
-    var acc = this.onGround ? 14 : 4;
+    var stunned = typeof BT !== "undefined" && (BT.locked() || BT.diveT > 0);
+    var acc = this.onGround ? (stunned ? 3 : 14) : (stunned ? 0.5 : 4);
     this.vel.x += (tx - this.vel.x) * Math.min(1, acc * dt);
     this.vel.z += (tz - this.vel.z) * Math.min(1, acc * dt);
     // Knockback from obstacles is added straight into vel by ENT
@@ -112,8 +114,8 @@ var PL = {
     // Jumping (coyote time + input buffer)
     this.coyote = this.onGround ? 0.12 : this.coyote - dt;
     if (this.jumpBuf > 0) this.jumpBuf -= dt;
-    if (this.jumpBuf > 0 && this.coyote > 0) {
-      this.vel.y = this.JUMP * (c.gravity < 1 ? 0.9 : 1); this.onGround = false; this.coyote = 0; this.jumpBuf = 0;
+    if (this.jumpBuf > 0 && this.coyote > 0 && !(typeof BT !== "undefined" && BT.locked())) {
+      this.vel.y = this.JUMP * (c.gravity < 1 ? 0.9 : 1) * (typeof PU !== "undefined" ? PU.jumpMul() : 1); this.onGround = false; this.coyote = 0; this.jumpBuf = 0;
       AudioEngine.sfx("jump");
       this._setAnim("jump");
     }
@@ -157,7 +159,8 @@ var PL = {
       while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
       this.yaw += dy * Math.min(1, 12 * dt);
     }
-    if (this.animT > 0) this.animT -= dt;
+    if (typeof BT !== "undefined" && BT.locked()) this._setAnim(BT.frozenT > 0 ? "idle" : "death");
+    else if (this.animT > 0) this.animT -= dt;
     else if (!this.onGround) this._setAnim(this.vel.y > 0 ? "jump" : this.airT > 0.35 ? "jump" : this.anim);
     else this._setAnim(hs > 5.6 ? "sprint" : hs > 0.5 ? "walk" : "idle");
     // Character aura (cosmetic)
@@ -181,10 +184,10 @@ var PL = {
   fall: function(type) {
     if (this.respawnT > 0) return;
     this.respawnT = 0.9;
-    AudioEngine.sfx(type === "void" || type === "none" ? "energy" : "splash");
+    AudioEngine.sfx(type === "void" || type === "none" ? "energy" : type === "ob" ? "swipe" : "splash");
     if (typeof spawnParticleBurst === "function") spawnParticleBurst(this.pos.clone(), new THREE.Color(type === "lava" ? 0xff5a10 : type === "void" ? 0xb46aff : 0x9adcf0), 18);
     if (localAvatarMesh) localAvatarMesh.visible = false;
-    if (typeof _flashPrompt === "function") _flashPrompt(type === "lava" ? "Too hot! Back to safety" : type === "void" ? "Whoops — back to safety" : "Splash! Back to safety");
+    if (typeof _flashPrompt === "function") _flashPrompt(type === "ob" ? "Out of bounds — back to the course" : type === "lava" ? "Too hot! Back to safety" : type === "void" ? "Whoops — back to safety" : "Splash! Back to safety");
   },
 
   // Knock the player back (cars, saws, stomping feet …)
@@ -204,6 +207,7 @@ var PL = {
   // Place the avatar mesh
   applyAvatar: function(dt) {
     if (!localAvatarMesh) return;
+    if (typeof VEH !== "undefined" && VEH.mySeat) return;   // seated: the car places us
     var fl = (typeof _playerFeetLift === "function") ? _playerFeetLift(myIdx) : 0;
     localAvatarMesh.position.set(this.pos.x, this.pos.y + fl, this.pos.z);
     localAvatarMesh.rotation.y = this.yaw;
@@ -241,9 +245,26 @@ PL.camRay = function(c, o, dx, dy, dz, dist) {
   return dist;
 };
 
+// One place that turns mouse / touch drags into camera movement, whatever you're doing
+PL.aimPitch = 0;
+PL.look = function(dx, dy) {
+  if (typeof VEH !== "undefined" && VEH.mySeat) {
+    VEH.camYawOff = (VEH.camYawOff || 0) - dx * 0.006;
+    VEH.camPitch = Math.max(-0.15, Math.min(0.9, (VEH.camPitch || 0.25) + dy * 0.004));
+    VEH.lastLook = T; return;
+  }
+  if (phase === "AIMING" && cameraMode !== "fp") {
+    baseAim += dx * 0.004; aimAngle = baseAim;
+    PL.aimPitch = Math.max(-0.35, Math.min(0.9, PL.aimPitch + dy * 0.004));
+    return;
+  }
+  if (cameraMode === "fp") { aimAngle += dx * 0.003; baseAim = aimAngle; fpPitch = Math.max(-1.1, Math.min(0.45, fpPitch - dy * 0.0025)); PL.camYaw += dx * 0.005; return; }
+  PL.camYaw += dx * 0.005; PL.camPitch = Math.max(-0.2, Math.min(1.2, PL.camPitch + dy * 0.004)); PL.lastCamInput = T;
+};
+
 // ── Touch controls: joystick (left), drag-look (right), jump button ──────────
 PL.stick = { active: false, id: -1, x: 0, y: 0, ox: 0, oy: 0 };
-PL.look = { id: -1, x: 0, y: 0 };
+PL.lookT = { id: -1, x: 0, y: 0 };
 PL.jumpHeld = false;
 PL.initTouch = function() {
   var pad = document.getElementById("walk-pad"), knob = document.getElementById("walk-knob"), jb = document.getElementById("jump-btn");
@@ -269,34 +290,43 @@ PL.initTouch = function() {
     jb.addEventListener("mousedown", function(e) { e.preventDefault(); PL.jumpHeld = true; PL.jump(); });
     jb.addEventListener("mouseup", function() { PL.jumpHeld = false; });
   }
-  // Camera drag (mouse anywhere on the canvas, touch on the right side) while walking
+  // Mouse look: right (or middle) button drag works everywhere; left drag also looks while walking.
+  // (While aiming, left drag is the throw — right drag turns your aim and raises / lowers the view.)
   var dragging = false, lx = 0, ly = 0;
+  var cv = function() { return typeof renderer !== "undefined" ? renderer.domElement : null; };
+  window.addEventListener("contextmenu", function(e) { if (e.target === cv()) e.preventDefault(); });
   window.addEventListener("mousedown", function(e) {
-    if (phase !== "WALKING" || (typeof renderer !== "undefined" && e.target !== renderer.domElement)) return;
+    if (e.target !== cv() || phase === "MENU") return;
+    var look = e.button === 2 || e.button === 1 || (e.button === 0 && phase === "WALKING");
+    if (!look) return;
+    if (e.button === 1) e.preventDefault();
     dragging = true; lx = e.clientX; ly = e.clientY;
   });
   window.addEventListener("mousemove", function(e) {
     if (!dragging) return;
-    PL.camYaw += (e.clientX - lx) * 0.005; PL.camPitch = Math.max(-0.2, Math.min(1.2, PL.camPitch + (e.clientY - ly) * 0.004));
-    lx = e.clientX; ly = e.clientY; PL.lastCamInput = T;
+    PL.look(e.clientX - lx, e.clientY - ly);
+    lx = e.clientX; ly = e.clientY;
   });
   window.addEventListener("mouseup", function() { dragging = false; });
-  window.addEventListener("wheel", function(e) { if (phase === "WALKING") PL.camDist = Math.max(2.5, Math.min(14, PL.camDist + e.deltaY * 0.01)); }, { passive: true });
+  window.addEventListener("wheel", function(e) {
+    if (typeof VEH !== "undefined" && VEH.mySeat) { VEH.camDist = Math.max(6, Math.min(22, (VEH.camDist || 10.5) + e.deltaY * 0.01)); return; }
+    if (phase === "WALKING") PL.camDist = Math.max(2.5, Math.min(14, PL.camDist + e.deltaY * 0.01));
+  }, { passive: true });
   window.addEventListener("touchstart", function(e) {
-    if (phase !== "WALKING" || typeof renderer === "undefined") return;
+    if (phase !== "WALKING" || typeof renderer === "undefined") return;   // (aiming uses the drag to throw)
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.target === renderer.domElement && PL.look.id < 0) { PL.look.id = t.identifier; PL.look.x = t.clientX; PL.look.y = t.clientY; }
+      if (t.target === renderer.domElement && PL.lookT.id < 0) { PL.lookT.id = t.identifier; PL.lookT.x = t.clientX; PL.lookT.y = t.clientY; }
     }
   }, { passive: true });
   window.addEventListener("touchmove", function(e) {
     for (var i = 0; i < e.changedTouches.length; i++) {
-      var t = e.changedTouches[i]; if (t.identifier !== PL.look.id) continue;
-      PL.camYaw += (t.clientX - PL.look.x) * 0.008; PL.camPitch = Math.max(-0.2, Math.min(1.2, PL.camPitch + (t.clientY - PL.look.y) * 0.006));
-      PL.look.x = t.clientX; PL.look.y = t.clientY; PL.lastCamInput = T;
+      var t = e.changedTouches[i]; if (t.identifier !== PL.lookT.id) continue;
+      PL.look((t.clientX - PL.lookT.x) * 1.5, (t.clientY - PL.lookT.y) * 1.5);
+      PL.lookT.x = t.clientX; PL.lookT.y = t.clientY;
     }
   }, { passive: true });
-  window.addEventListener("touchend", function(e) { for (var i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === PL.look.id) PL.look.id = -1; });
+  window.addEventListener("touchend", function(e) { for (var i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === PL.lookT.id) PL.lookT.id = -1; });
   window.addEventListener("keydown", function(e) {
     if (e.key === " " && (phase === "WALKING" || phase === "AIMING" || phase === "LANDED")) {
       e.preventDefault();

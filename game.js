@@ -69,17 +69,13 @@ function _doPunch() {
   if (bestIdx < 0) return;  // swing and a miss
   var rp = remotePlayers[bestIdx];
   var pdx = rp.body.x - PL.pos.x, pdz = rp.body.z - PL.pos.z, pl = Math.hypot(pdx, pdz) || 1;
-  var gravBonus = (typeof activePowerups !== "undefined" && activePowerups.lowgrav && activePowerups.lowgrav.until > Date.now()) ? 1.6 : 1.0;
-  var impulse = (9 + Math.hypot(PL.vel.x, PL.vel.z) * 0.6) * gravBonus, dirX = pdx / pl, dirZ = pdz / pl;
-  rp.punchStagger = 1.1; rp.punchImmunity = 1.3;
-  if (rp.avatarMesh && typeof switchAvatarAnim === "function") switchAvatarAnim(rp.avatarMesh, "jump");
-  _spawnBonkText(rp.body.clone().add(new THREE.Vector3(0, 2, 0)));
+  // A slap knocks them out (Battle mode rules); a running slap hits harder
+  var impulse = 9 + Math.hypot(PL.vel.x, PL.vel.z) * 0.6;
+  rp.punchImmunity = 1.3;
+  _spawnBonkText(rp.body.clone().add(new THREE.Vector3(0, 2, 0)), "SLAP!");
   AudioEngine.sfx("bonk");
   if (typeof _screenShake !== "undefined") { _screenShake = 0.42; _screenShakeT = 0.5; }
-  if (mpMode && typeof sendToAll === "function") {
-    sendToAll({ t: "punch_launch", from: myIdx, target: bestIdx, px: rp.body.x, py: rp.body.y, pz: rp.body.z,
-      vx: dirX * impulse, vy: 5.0 * gravBonus, vz: dirZ * impulse, dx: dirX, dz: dirZ, impulse: impulse, stagger: 1.1 });
-  }
+  BT.hit(bestIdx, "slap", pdx / pl, pdz / pl, impulse, 7);
 }
 
 function _punchSwingEffect() {
@@ -634,8 +630,9 @@ function loadHole(idx) {
   if (C.hazard.type === "water" || C.hazard.type === "lava" || (C.hazard.type === "void" && _wk === "grid")) {
     var _wm = GFX.buildWater(h); courseGrp.add(_wm); C.waterMesh = _wm;
   }
-  if (C.backdrop) courseGrp.add(buildBackdrop(h, idx, C));
-  else if (h.theme === "minecraft" || h.theme === "moon") courseGrp.add(GFX.buildHorizon(h));
+  var _vista = typeof WORLD !== "undefined" ? WORLD.build(h, idx, C) : null;
+  if (_vista) courseGrp.add(_vista);
+  else if (C.backdrop) courseGrp.add(buildBackdrop(h, idx, C));
   // Tee pad + tee sign
   var _tpad = buildTeePad(C.tee.yaw, C.tee.y); _tpad.position.set(C.tee.x, 0, C.tee.z); courseGrp.add(_tpad);
   if (!C.ceiling) { var _tsign = buildTeeSign(h, C.tee.yaw, C.tee.y); _tsign.position.x += C.tee.x; _tsign.position.z += C.tee.z; courseGrp.add(_tsign); }
@@ -660,13 +657,21 @@ function loadHole(idx) {
 
   // Living obstacles (critters, traffic, socks, feet, lasers …)
   obstacles = ENT.spawnAll(h, _built.spawns, idx);
+  if (typeof VEH !== "undefined") VEH.spawnFor(h);
 
   initTrajDots();
   initTrail();
   spawnPowerups(h, idx);
+  BT.onHoleStart(h);
 
   GFX.fogBoost = h.mods.indexOf("fog") >= 0 ? 3.2 : 1;
-  const weathers = ["clear","clear","clear","windy","rainy","foggy","hot","stormy","snow"];
+  // Weather that fits the world: none indoors, in space or in the neon clubs
+  var _wArch = h.arch, weathers = ["clear","clear","clear","windy","rainy","foggy","hot","stormy","snow"];
+  if (_wArch === "interior" || _wArch === "club" || _wArch === "moon" || h.theme === "geometry_dash" || h.theme === "skyblock") weathers = ["clear"];
+  else if (h.theme === "winter") weathers = ["clear", "clear", "snow", "windy"];
+  else if (h.theme === "grandcanyon" || h.theme === "emote") weathers = ["clear", "clear", "hot", "windy"];
+  else if (h.theme === "city") weathers = ["clear", "clear", "rainy", "foggy", "stormy"];
+  else weathers = weathers.filter(function(w) { return w !== "snow"; });
   var _pickedWeather = weathers[Math.floor(Math.random() * weathers.length)];
   setWeather(_pickedWeather);
   if (mpMode && myIdx === 0) sendToAll({ t: "weather_sync", weather: _pickedWeather });
@@ -727,7 +732,7 @@ function loadHole(idx) {
   remotePlayers = Array.from({ length: MAX_PLAYERS }, () => null);
   if (mpMode) {
     for (let i = 0; i < playerCount; i++) {
-      if (i === myIdx) continue;
+      if (i === myIdx || (window._leftPlayers && window._leftPlayers[i])) continue;
       var _rpCol = PLAYER_COLORS[i % PLAYER_COLORS.length];
       // Start remote player at tee surface, offset slightly so they don't stack
       var _teeOffX = C.tee.x + (i - myIdx) * 1.2;
@@ -904,12 +909,18 @@ function scored() {
     playerDone[myIdx]   = true;
     playerThrows[myIdx] = throwCount;
     if (!mpScoreRecorded[myIdx]) { mpTotals[myIdx] += diff; mpScoreRecorded[myIdx] = true; }
-    sendToAll({ t: "score", from: myIdx, throws: throwCount, hole: holeIdx });
+    var _sm = { t: "score", from: myIdx, throws: throwCount, hole: holeIdx, el: +(netTime() - BT.holeStartT).toFixed(1),
+      lm: _throwStart ? +Math.hypot(_throwStart.x - basketWP.x, _throwStart.z - basketWP.z).toFixed(1) : 0 };
+    sendToAll(_sm);
+    BT.onScore(myIdx, throwCount, _sm);
     updateMpUI();
     if (!checkAllDone()) {
-      const watchIdx = playerDone.findIndex((d, i) => !d && i < playerCount);
-      setSpectating(true, watchIdx);
-      showMsg(labels[idx2], "Watching others\u2026", null);
+      if (BT.on()) { showMsg(labels[idx2], "Keep causing chaos while the others finish\u2026", null); BT.goRoam(); }
+      else {
+        const watchIdx = playerDone.findIndex((d, i) => !d && i < playerCount);
+        setSpectating(true, watchIdx);
+        showMsg(labels[idx2], "Watching others\u2026", null);
+      }
     }
   } else {
     setSpectating(false);
@@ -925,6 +936,7 @@ var discLie = null;          // where the disc rests between throws
 function landed() {
   if (!HOLES[holeIdx]) { phase = "AIMING"; return; }
   phase = "LANDED";
+  PU.fireThrow = false;
   const h = HOLES[holeIdx], m = Math.hypot(discPos.x - h.bx, discPos.z - h.bz);
   discLie = discPos.clone();
   ENT.landT = T;
@@ -946,10 +958,12 @@ function landed() {
       playerDone[myIdx]   = true;
       playerThrows[myIdx] = throwCount;
       if (mpMode) {
-        sendToAll({ t: "givenup", from: myIdx, throws: throwCount, hole: holeIdx });
+        sendToAll({ t: "givenup", from: myIdx, throws: throwCount, hole: holeIdx, dnf: 1 });
+        BT.onScore(myIdx, throwCount, { dnf: 1 });
         if (!mpScoreRecorded[myIdx]) { mpTotals[myIdx] += throwCount - HOLES[holeIdx].par; mpScoreRecorded[myIdx] = true; }
         updateMpUI();
-        if (!checkAllDone()) {
+        if (BT.on() && !checkAllDone()) { showMsg("MAX THROWS", "No points this hole \u2014 go wreck the others!", null); BT.goRoam(); }
+        else if (!checkAllDone()) {
           const watchIdx = playerDone.findIndex((d, i) => !d && i < playerCount);
           setSpectating(true, watchIdx);
           showMsg("MAX THROWS", "Watching others finish\u2026", null);
@@ -984,6 +998,7 @@ function startWalking(afterThrow) {
 }
 function pickUpDisc() {
   var h = HOLES[holeIdx]; if (!h) return;
+  if (typeof VEH !== "undefined" && VEH.mySeat) VEH.exit();
   var C = h.course, g = C.heightAt(discPos.x, discPos.z);
   phase = "AIMING"; _aimSince = T;
   PL.pos.set(discPos.x, g, discPos.z); PL.vel.set(0, 0, 0); PL.onGround = true;
@@ -1039,16 +1054,17 @@ function outOfBounds(isTimeout) {
   phase = "SCORED";
   throwCount++;
   var h2 = HOLES[holeIdx];
+  var _hzT0 = h2.course ? h2.course.hazardAt(discPos.x, discPos.z).type : "water";
   if (typeof handleImpact === "function") {
     var _hazType = isTimeout ? "energy"
-      : (h2.theme==="moon"||h2.theme==="grandcanyon") ? "crater" : "water";
+      : _hzT0 === "ob" ? "terrain" : (h2.theme==="moon"||h2.theme==="grandcanyon") ? "crater" : "water";
     handleImpact(_hazType, discPos.clone(), discVel.clone());
   }
   var _hz = h2.course ? h2.course.hazardAt(discPos.x, discPos.z).type : "water";
   var hazardMsg = isTimeout ? "Lost in the void"
     : _hz === "lava" ? "Into the lava"
     : _hz === "void" ? (h2.theme === "moon" ? "Down the crater" : "Lost in the void")
-    : _hz === "none" ? "Out of bounds"
+    : _hz === "none" || _hz === "ob" ? "Out of bounds"
     : h2.theme === "poolrooms" ? "Into the pool"
     : "Water hazard";
   if (ENT.carrying) { ENT.carrying.state = null; ENT.carrying = null; }
@@ -1467,9 +1483,13 @@ function animate() {
     });
   }
 
+  // The Profile / case screens cover the world: stop drawing it behind them (saves a lot of GPU)
+  var _covered = typeof PF !== "undefined" && (PF.open || PF.caseOpen);
   // While in MENU or before a hole is loaded, just render and return
   if (phase === "MENU" || !HOLES[holeIdx]) {
-    if (_menuBackdrop && phase === "MENU") { _menuCamera(T); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    if (_covered) return;
+    if (typeof _lobby3D !== "undefined" && _lobby3D) { _lobbyTick(dt); updateParticles(dt); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    else if (_menuBackdrop && phase === "MENU") { _menuCamera(T); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
     AudioEngine.updateFlight(false, 0, false);
     GFX.update(dt, null);
     GFX.render();
@@ -1521,7 +1541,7 @@ function animate() {
   if (_C && _C.tide && _C.tide.t > _C.tide.delay && !_C._tideWarned) { _C._tideWarned = true; _flashPrompt(_C.hazard.type === "lava" ? "The lava is rising — hurry!" : "The tide is rising — hurry!"); }
 
   // ── WALKING: the player runs / jumps to the disc ──
-  if ((phase === "WALKING" || phase === "LANDED") && _C) {
+  if ((phase === "WALKING" || phase === "LANDED") && _C && !BT.finished) {
     // The resting disc rides moving platforms, drops when its platform crumbles
     if (!ENT.carrying) {
       var _ds = _C.supportAt(discPos.x, discPos.z);
@@ -1536,17 +1556,21 @@ function animate() {
     document.getElementById("dist").style.opacity = "0";
     if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) < 1.4) pickUpDisc(); else startWalking(true);
   }
-  if (phase === "WALKING" && _C) {
+  if (phase === "WALKING" && _C && typeof VEH !== "undefined" && VEH.mySeat) {
+    // in a car: the vehicle moves us; no pick-ups from the driver's seat
+    var _wd2 = document.getElementById("walk-dist");
+    if (_wd2 && (_nameLabelFrame % 6 === 0)) { var _d2 = Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z); _wd2.textContent = _d2 < 6 ? "hop out (E)" : Math.round(_d2) + " m"; }
+  } else if (phase === "WALKING" && _C) {
     if (_punchCooldown > 0) _punchCooldown -= dt;
     if (typeof _tickPunchTimers === "function") _tickPunchTimers(dt);
     if ((keys.r || keys.R) && _punchCooldown <= 0 && mpMode) { _punchCooldown = 1.2; keys.r = keys.R = false; _doPunch(); }
     PL.update(dt);
     var _dd = Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z);
     if (_dd > 2.4) _pickupArmed = true;
-    if (_pickupArmed && !ENT.carrying && PL.respawnT <= 0 && _dd < 1.3 && Math.abs(discPos.y - PL.pos.y) < 1.7) pickUpDisc();
+    if (_pickupArmed && !BT.finished && !BT.locked() && !ENT.carrying && PL.respawnT <= 0 && _dd < 1.3 && Math.abs(discPos.y - PL.pos.y) < 1.7) pickUpDisc();
     if (ENT.carrying && Math.hypot(ENT.carrying.x - PL.pos.x, ENT.carrying.z - PL.pos.z) < 2.2) ENT.dropDisc(ENT.carrying, true);
     var _wd = document.getElementById("walk-dist");
-    if (_wd && (_nameLabelFrame % 6 === 0)) _wd.textContent = _dd < 1.5 ? "Grab it!" : Math.round(_dd) + " m";
+    if (_wd && (_nameLabelFrame % 6 === 0)) _wd.textContent = BT.finished ? "done ✓" : BT.locked() ? "💫 knocked out" : _dd < 1.5 ? "Grab it!" : Math.round(_dd) + " m";
   }
 
   // Mid-flight disc tilt — A/D
@@ -1591,6 +1615,8 @@ function animate() {
   });
 
   stepPhysics(dt);
+  if (typeof VEH !== "undefined") VEH.update(dt);
+  if (typeof WORLD !== "undefined") WORLD.update(performance.now() / 1000);
   if(_screenShakeT>0){_screenShakeT-=dt;_screenShake*=Math.pow(0.82, dt*60);if(_screenShakeT<=0)_screenShake=0;}
   updateCamera(dt);
   _updateOccluders(dt);
@@ -1601,12 +1627,10 @@ function animate() {
   updateRain(dt);
   checkPowerupCollection();
 
-  powerupMeshes.forEach((p) => {
-    if (!p.collected && p.mesh) {
-      p.mesh.rotation.y  += dt * 2;
-      p.mesh.position.y  += Math.sin(T * 2 + p.x) * 0.008;
-    }
-  });
+  PU.update(dt);
+  BT.update(dt);
+  if (BT.stunT > 0 && phase !== "WALKING" && phase !== "MENU" && _C) PL.update(dt);
+
 
   if (stepBackCooldown > 0) {
     stepBackCooldown = Math.max(0, stepBackCooldown - dt);
@@ -1648,14 +1672,16 @@ function animate() {
       discMesh.visible = cameraMode === "tp";
       discMesh.scale.setScalar(DISC_SCALE_HAND);
       var _rgX = Math.cos(aimAngle), _rgZ = Math.sin(aimAngle);
-      discMesh.position.set(discPos.x + _rgX * 0.34 + _fwX * 0.22, _gndNow + 1.0 + throwPower * 0.25, discPos.z + _rgZ * 0.34 + _fwZ * 0.22);
-      discMesh.rotation.set(0, Math.atan2(_fwX, _fwZ), releaseBank * 0.9);
+      // held out to the right, tilted so the camera behind the shoulder sees the skin
+      discMesh.scale.setScalar(DISC_SCALE_HAND * 1.15);
+      discMesh.position.set(discPos.x + _rgX * 0.62 + _fwX * 0.05, _gndNow + 1.05 + throwPower * 0.25, discPos.z + _rgZ * 0.62 + _fwZ * 0.05);
+      discMesh.rotation.set(-0.75, Math.atan2(_fwX, _fwZ), releaseBank * 0.9);
       (discMesh.userData.spinner || discMesh).rotation.y += 0.6 * dt;
     }
   } else if (phase === "WALKING" || phase === "LANDED" || phase === "FLYING" || phase === "SCORED") {
     PL.applyAvatar(dt);
     if (phase === "FLYING" && localAvatarMesh && !localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) localAvatarMesh.children[7].rotation.z = -1.3;
-    if ((phase === "WALKING" || phase === "LANDED") && discMesh) {
+    if ((phase === "WALKING" || phase === "LANDED") && discMesh && !BT.finished) {
       // The disc lies on the ground where it stopped (or dangles from a thief)
       discMesh.visible = true;
       discMesh.scale.setScalar(DISC_SCALE_FLIGHT);
@@ -1665,6 +1691,7 @@ function animate() {
     }
   }
   if (!discMarker) { discMarker = _buildDiscMarker(); scene.add(discMarker); }
+  if (BT.finished) discMarker.visible = false;
   if (discMarker.visible) {
     discMarker.position.set(discPos.x, discPos.y - 0.05, discPos.z);
     var _pk = 1 + Math.sin(T * 4) * 0.12; discMarker.userData.ring.scale.set(_pk, _pk, _pk);
@@ -1676,7 +1703,10 @@ function animate() {
     if (_posBcastAcc >= 0.067) {
       _posBcastAcc = 0;
       if (phase !== "MENU") {
-        sendToAll({t:"pos",px:PL.pos.x,py:PL.pos.y,pz:PL.pos.z,aim:aimAngle,yaw:PL.yaw,an:PL.anim,vm:Math.round(Math.hypot(PL.vel.x,PL.vel.z)*10)/10});
+        var _q = function(v) { return Math.round(v * 100) / 100; };
+        var _pm = {t:"pos",px:_q(PL.pos.x),py:_q(PL.pos.y),pz:_q(PL.pos.z),aim:_q(aimAngle),yaw:_q(PL.yaw),an:PL.anim,vm:Math.round(Math.hypot(PL.vel.x,PL.vel.z)*10)/10};
+        var _sig = _pm.px + "," + _pm.py + "," + _pm.pz + "," + _pm.aim + "," + _pm.yaw + "," + _pm.an;
+        if (_sig !== window._lastPosSig || T - (window._lastPosT || 0) > 1) { window._lastPosSig = _sig; window._lastPosT = T; sendToAll(_pm); }
       }
     }
   }
@@ -1706,7 +1736,7 @@ function animate() {
   AudioEngine.updateFlight(phase === "FLYING", discVel.length(), timeScale < 0.75);
   var _focus = (phase === "FLYING") ? discPos : PL.pos;
   GFX.update(dt, _focus);
-  GFX.render();
+  if (!_covered) GFX.render();
 }
 
 initMenuDecor();
@@ -1738,9 +1768,7 @@ window.addEventListener("mousedown", function(e) {
 });
 window.addEventListener("mousemove", function(e) {
   if (!_fpDrag || cameraMode !== "fp") return;
-  var dx = e.clientX - _fpLastX, dy = e.clientY - _fpLastY;
-  aimAngle += dx * _fpSensX; baseAim = aimAngle;  // +dx = look right
-  fpPitch   = Math.max(-1.1, Math.min(0.45, fpPitch - dy * _fpSensY));
+  PL.look(e.clientX - _fpLastX, e.clientY - _fpLastY);
   _fpLastX = e.clientX; _fpLastY = e.clientY;
 });
 window.addEventListener("mouseup", function(e) { if (e.button === 0) _fpDrag = false; });

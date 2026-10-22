@@ -58,7 +58,7 @@ var RARITY_HEX = { common: "#9aa8b4", rare: "#3a9aff", epic: "#b45aff", legendar
 .pf-how{margin-top:12px;font-size:12px;color:#4a6a82;font-weight:600;text-align:center;line-height:1.5;}
 /* Case opening */
 #case-open{position:fixed;inset:0;z-index:260;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;
-  background:radial-gradient(80% 70% at 50% 40%,rgba(30,70,110,.82),rgba(6,16,30,.94));-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#fff;padding:20px;}
+  background:radial-gradient(80% 70% at 50% 40%,#1e466e,#06101e);color:#fff;padding:20px;}
 #case-open h2{margin:0;font-size:26px;font-weight:900;letter-spacing:.02em;text-shadow:0 4px 20px rgba(0,0,0,.4);}
 .co-window{position:relative;width:min(920px,94vw);height:168px;overflow:hidden;border-radius:22px;background:rgba(255,255,255,.07);
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.15),inset 0 0 60px rgba(0,0,0,.35);}
@@ -231,10 +231,17 @@ PF.casesTab = function() {
       "<button class='btn' " + (COS.state.coins >= COS.CASE_PRICE ? "" : "disabled") + " onclick=\"if(COS.buyCase('" + k + "'))PF.render()\">Buy · 🪙 " + COS.CASE_PRICE + "</button></div>";
   });
   h += "</div><div class='pf-odds'>" + COS.RARITIES.map(function(r) { return "<span style='color:" + RARITY_HEX[r] + "'>" + r + " " + COS.RARITY_WEIGHT[r] + "%</span>"; }).join("") + "</div>";
+  h += "<div class='code-row' style='margin-top:12px'><input id='pf-code' class='input' placeholder='Got a code?' maxlength='20' autocomplete='off'><button class='btn' onclick='PF.redeem()'>Redeem</button></div>";
   h += "<div class='pf-how'>🏆 <b>Win a game to earn a case:</b> finish a single-player round at or under par, or win a multiplayer match.<br>Already own what you pull? You get coins instead — 100 coins buys a case.</div>";
   return h;
 };
 
+PF.redeem = function() {
+  var el = document.getElementById("pf-code"); if (!el) return;
+  var c = el.value.trim().toUpperCase(); el.value = "";
+  if (c === COS.SECRET || c === (typeof PLAYER_SKINS_MASTER_CODE !== "undefined" ? PLAYER_SKINS_MASTER_CODE : "TOYOTA")) { COS.unlockAll(); PF.toast("💧 Every cosmetic unlocked!"); PF.render(); }
+  else { el.placeholder = "That code didn't work"; }
+};
 PF.setChar = function(id) {
   equippedPlayerSkin = id; if (typeof savePlayerSkin === "function") savePlayerSkin();
   if (typeof scene !== "undefined" && typeof localAvatarMesh !== "undefined" && localAvatarMesh && phase !== "MENU") {
@@ -300,9 +307,14 @@ PF.stageStart = function() {
     sc.add(PF.stage.root);
   }
   PF.stageRebuild();
-  var loop = function() {
-    if (!PF.open) return;
+  if (PF._loopRunning) return;
+  PF._loopRunning = true;
+  var last = 0;
+  var loop = function(now) {
+    if (!PF.open) { PF._loopRunning = false; return; }
     requestAnimationFrame(loop);
+    if (PF.caseOpen || now - last < 33) return;   // 30 fps is plenty for a turntable; nothing while a case is opening
+    last = now;
     var S = PF.stage, w = cv.clientWidth, h = cv.clientHeight;
     if (w && h && (cv.width !== Math.round(w * S.r.getPixelRatio()) || cv.height !== Math.round(h * S.r.getPixelRatio()))) { S.r.setSize(w, h, false); S.cam.aspect = w / h; S.cam.updateProjectionMatrix(); }
     if (!PF._drag) S.turn += 0.006;
@@ -312,7 +324,7 @@ PF.stageStart = function() {
     S.cam.position.set(0.25, 1.35, 4.9); S.cam.lookAt(0.25, 0.9, 0);
     S.r.render(S.sc, S.cam);
   };
-  loop();
+  requestAnimationFrame(loop);
 };
 PF.stageRebuild = function() {
   var S = PF.stage; if (!S) return;
@@ -395,7 +407,7 @@ PF.openCase = function(kind) {
   document.getElementById("co-title").textContent = "Opening " + COS.CASES[kind].name + "…";
   rev.className = "co-reveal"; rev.innerHTML = "";
   document.getElementById("co-window").style.display = "";
-  co.style.display = "flex";
+  co.style.display = "flex"; PF.caseOpen = true;
   // Reel: 44 random items, the prize at index 38
   var N = 44, WIN = 38, items = [];
   for (var i = 0; i < N; i++) items.push(i === WIN ? res.item : COS.rollItem(kind));
@@ -451,7 +463,7 @@ PF.reveal = function(res) {
   AudioEngine.sfx("powerup");
   if (res.item.rarity === "legendary" || res.item.rarity === "epic") AudioEngine.stinger(res.item.rarity === "legendary" ? "ace" : "birdie");
 };
-PF.closeCase = function() { document.getElementById("case-open").style.display = "none"; if (PF.open) PF.render(); };
+PF.closeCase = function() { document.getElementById("case-open").style.display = "none"; PF.caseOpen = false; if (PF.open) PF.render(); };
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── REWARDS: winning a game earns a case ─────────────────────────────────────
@@ -473,7 +485,8 @@ PF.matchEnd = function(totals) {
   if (PF._awardedRound === matchSeed || !totals) return false;
   PF._awardedRound = matchSeed;
   var mine = totals[myIdx], best = Infinity;
-  for (var i = 0; i < playerCount; i++) if (typeof totals[i] === "number") best = Math.min(best, totals[i]);
+  var left = window._leftPlayers || {};
+  for (var i = 0; i < playerCount; i++) if (typeof totals[i] === "number" && !left[i]) best = Math.min(best, totals[i]);
   if (typeof mine !== "number" || mine > best) return false;
   var kind = COS.awardCase();
   PF.toast("🏆 You won the match! +1 " + COS.CASES[kind].icon + " " + COS.CASES[kind].name);

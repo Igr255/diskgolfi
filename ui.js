@@ -64,6 +64,12 @@ function updateMpUI() {
     const scoreEl  = document.getElementById("mpscore-"  + i);
     const throwsEl = document.getElementById("mpthrows-" + i);
     if (nameEl)   nameEl.textContent  = playerNames[i];
+    if (typeof BT !== "undefined" && BT.on() && BT.pts.length) {
+      var _br = BT.boardRow(i);
+      if (scoreEl) scoreEl.textContent = _br.score;
+      if (throwsEl) throwsEl.textContent = _br.sub;
+      continue;
+    }
     if (scoreEl)  scoreEl.textContent = mpTotals[i] === 0 ? "E" : mpTotals[i] > 0 ? "+" + mpTotals[i] : "" + mpTotals[i];
     if (throwsEl) throwsEl.textContent = playerDone[i]
       ? "\u2713 " + playerThrows[i]
@@ -119,7 +125,8 @@ function _discSweetSpot(key) {
 function updateDiscLabel() {
   var el = document.getElementById("disc-label"); if (!el) return;
   var d = DISCS[selectedDisc] || {}, ss = _discSweetSpot(selectedDisc);
-  el.innerHTML = (d.label || selectedDisc) + " <span>· best " + Math.round(ss[0] * 100) + "–" + Math.round(ss[1] * 100) + "%</span>";
+  var sk = (typeof COS !== "undefined") ? COS.discSkin((equippedSkins || {})[selectedDisc] || "classic") : null;
+  el.innerHTML = (d.label || selectedDisc) + (sk && sk.id !== "classic" ? " · " + sk.name : "") + " <span>· best " + Math.round(ss[0] * 100) + "–" + Math.round(ss[1] * 100) + "%</span>";
   var z = document.getElementById("pwr-zone");
   if (z) { z.style.left = (ss[0] * 100) + "%"; z.style.width = ((ss[1] - ss[0]) * 100) + "%"; }
 }
@@ -137,6 +144,11 @@ function initGameDiscPicker() {
     b.innerHTML = '<span class="orb" style="--c:' + _discCss(key) + '"></span><span class="dkey">' + (i + 1) + '</span>';
     b.onclick = () => selectDisc(key);
     container.appendChild(b);
+    // show the real skin artwork on the button
+    var skinId = (equippedSkins || {})[key] || "classic";
+    if (typeof PF !== "undefined" && PF.thumb) PF.thumb("disc:" + key + ":" + skinId, function(url) {
+      var orb = b.querySelector(".orb"); if (orb) { orb.classList.add("pic"); orb.style.setProperty("--img", "url(" + url + ")"); }
+    });
   });
   updateDiscLabel();
 }
@@ -316,6 +328,8 @@ function doThrow() {
   discBank[0] = releaseBank;
   _groundTime = 0;
 
+  if (typeof PU !== "undefined" && PU.fireNext) { launchVel.multiplyScalar(1.4); PU.fireNext = false; PU.fireThrow = true; AudioEngine.sfx("energy"); }
+  if (typeof BT !== "undefined") BT._hitThisThrow = {};
   discVel.copy(launchVel);
   discSpin = d.maxSpin * throwPower;
   throwCount++;
@@ -330,7 +344,8 @@ function doThrow() {
     t: "throw", from: myIdx,
     px: discPos.x, py: discPos.y, pz: discPos.z,
     vx: discVel.x, vy: discVel.y, vz: discVel.z,
-    disc: selectedDisc, skin: (discMesh && discMesh.userData.skinId) || "classic", count: throwCount, hz: releaseBank
+    disc: selectedDisc, skin: (discMesh && discMesh.userData.skinId) || "classic", count: throwCount, hz: releaseBank,
+    fire: typeof PU !== "undefined" && PU.fireThrow ? 1 : 0
   });
 }
 

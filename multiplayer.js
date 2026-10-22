@@ -56,6 +56,7 @@ function _watchIce(c, cb) {
 // ══════════════════════════════════════════════════════════════════════
 var RELAY_BROKERS = ["wss://broker.hivemq.com:8884/mqtt", "wss://broker.emqx.io:8084/mqtt"];
 var _hubs = [];        // host: one per transport it listens on;  guest: the one it joined through
+var _relayGuests = {}; // host: guest id → hub it is connected through (a guest reaches us on several brokers)
 var _relayErr = "";    // why the internet relay couldn't be used (for the error message)
 
 function _loadMqtt(cb) {
@@ -125,14 +126,18 @@ function _hubHost(bus, code, onConn) {
     if (!m || !m.g) return;
     var rc = hub.conns[m.g];
     if (m.hello) {
+      if (_relayGuests[m.g] && _relayGuests[m.g] !== hub) return;   // already connected through another broker
       if (!rc) {
+        _relayGuests[m.g] = hub;
         rc = new RelayConn(function(raw) { bus.pub(base + "/g/" + m.g, raw === null ? JSON.stringify({ bye: 1 }) : JSON.stringify({ d: raw })); }, bus.kind);
         hub.conns[m.g] = rc;
+        bus.pub(base + "/g/" + m.g, JSON.stringify({ welcome: 1 }));   // welcome first: the guest drops data that arrives before it
         onConn(rc);
         rc.open = true; rc._emit("open");
+        return;
       }
       bus.pub(base + "/g/" + m.g, JSON.stringify({ welcome: 1 }));
-    } else if (m.bye) { if (rc) { delete hub.conns[m.g]; if (rc.open) { rc.open = false; rc._emit("close"); } } }
+    } else if (m.bye) { if (rc) { delete hub.conns[m.g]; delete _relayGuests[m.g]; if (rc.open) { rc.open = false; rc._emit("close"); } } }
     else if (rc && m.d !== undefined) rc._emit("data", m.d);
   });
   bus.onClose(function() { Object.keys(hub.conns).forEach(function(g) { var c = hub.conns[g]; if (c.open) { c.open = false; c._emit("close"); } }); });
@@ -146,8 +151,9 @@ function _relayHostStart(code, onConn) {
   }, function(n) { if (!n) console.warn("DiskGolfi: internet relay unavailable — " + _relayErr); });
 }
 // Guest side: say hello on a bus until the host welcomes us; cb(conn) or cb(null) after `tries` seconds
-function _hubJoin(bus, code, tries, cb) {
-  var base = "dgolf/v1/" + code, gid = Math.random().toString(36).slice(2, 10), mine = base + "/g/" + gid;
+function _hubJoin(bus, code, tries, cb, gid) {
+  var base = "dgolf/v1/" + code, mine;
+  gid = gid || Math.random().toString(36).slice(2, 10); mine = base + "/g/" + gid;
   var hub = { bus: bus, conns: {} }; _hubs.push(hub);
   var rc = new RelayConn(function(raw) { bus.pub(base + "/h", JSON.stringify(raw === null ? { g: gid, bye: 1 } : { g: gid, d: raw })); }, bus.kind);
   var settled = false, n = 0, step = bus.kind === "local" ? 150 : 1000;
@@ -160,27 +166,28 @@ function _hubJoin(bus, code, tries, cb) {
   bus.onMsg(function(topic, str) {
     if (topic !== mine) return;
     var m; try { m = JSON.parse(str); } catch (e) { return; }
-    if (m.welcome && !settled) { settled = true; clearInterval(iv); rc.open = true; cb(rc); rc._emit("open"); }
-    else if (m.bye && rc.open) { rc.open = false; rc._emit("close"); }
+    if ((m.welcome || m.d !== undefined) && !settled) { settled = true; clearInterval(iv); rc.open = true; cb(rc); rc._emit("open"); }   // any message from the host counts as a welcome
+    if (m.bye && rc.open) { rc.open = false; rc._emit("close"); }
     else if (m.d !== undefined && rc.open) rc._emit("data", m.d);
   });
   bus.onClose(function() { if (rc.open) { rc.open = false; rc._emit("close"); } });
   bus.sub(mine, say);
 }
 function _relayJoin(code, cb) {
-  var won = false, pending = 0, connected = false, allIn = false;
+  var won = false, pending = 0, connected = false, allIn = false, gid = Math.random().toString(36).slice(2, 10);   // same identity on every broker
   var finish = function() { if (!won && allIn && pending === 0) cb(null, connected ? "nohost" : "norelay"); };
   _busRelayAll(function(bus) {
     connected = true; pending++;
     _hubJoin(bus, code, 12, function(rc) {
       pending--;
       if (rc && !won) { won = true; cb(rc, ""); }
-      else if (rc) rc.close();          // another broker got there first
+      else if (rc) { rc.open = false; }   // another broker got there first (the host only knows us once)
       finish();
-    });
+    }, gid);
   }, function() { allIn = true; finish(); });
 }
 function _relayStop() {
+  _relayGuests = {};
   _hubs.forEach(function(h) {
     try { Object.keys(h.conns).forEach(function(g) { h.conns[g].close(); }); } catch (e) {}
     h.bus.end();
@@ -208,10 +215,33 @@ function sendTo(idx, data) {
   if (myIdx === 0 && conns[idx] && conns[idx].open) conns[idx].send(raw);
 }
 
+// Heartbeats: every peer pings every 1.5 s; silence for 8 s means they are gone
+var _HB_EVERY = 1500, _HB_TIMEOUT = 8000;
+setInterval(function() {
+  var now = Date.now();
+  conns.forEach(function(c, i) {
+    if (!c || !c.open) return;
+    try { c.send(JSON.stringify({ t: "hb" })); } catch (e) {}
+    if (c._lastSeen && now - c._lastSeen > _HB_TIMEOUT) { console.warn("DiskGolfi: player " + i + " timed out"); try { c.close(); } catch (e) {} if (c._onLost) c._onLost(); }
+  });
+}, _HB_EVERY);
+// Leaving the page: tell the others right away
+window.addEventListener("pagehide", function() {
+  conns.forEach(function(c) { if (c && c.open) { try { c.send(JSON.stringify({ t: "bye" })); c.close(); } catch (e) {} } });
+  try { _relayStop(); } catch (e) {}
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+});
+
 function setupConnForPlayer(c, pIdx) {
+  c._lastSeen = Date.now();
+  var _lostOnce = false;
+  c._onLost = function() { if (_lostOnce) return; _lostOnce = true; _connLost(c, pIdx); };
   c.on("data", (raw) => {
+    c._lastSeen = Date.now();
     try {
       const msg = JSON.parse(raw);
+      if (msg.t === "hb") return;
+      if (msg.t === "bye") { try { c.close(); } catch (e) {} c._onLost(); return; }
       if (msg.from === undefined) msg.from = pIdx;
       handleMsg(msg);
       if (myIdx === 0) {
@@ -220,33 +250,63 @@ function setupConnForPlayer(c, pIdx) {
       }
     } catch (e) {}
   });
-  c.on("close", () => {
-    if (conns[pIdx] !== c) return;   // an abandoned attempt (e.g. replaced by the relay) — not a real disconnect
-    var dName = playerNames[pIdx] || ("Player " + (pIdx+1));
-    conns[pIdx] = null;
-    if (pIdx === 0 && myIdx !== 0) {
-      // Host disconnected — show and return to menu
-      showMsg("HOST LEFT", "The host disconnected. Returning to menu.", null);
-      setTimeout(function() {
-        document.getElementById("menu").style.display = "flex";
-        document.getElementById("ui").style.display   = "none";
-        mpMode = false; hostGameStarted = false;
-        if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
-        conns.fill(null);
-      }, 3000);
-    } else {
-      // Player left — update count and notify
-      playerCount = conns.filter(Boolean).length + 1;  // +1 for self
-      showMsg("PLAYER LEFT", dName + " disconnected.", null);
-      setTimeout(hideMsg, 3000);
-      // Re-check if all remaining are done
-      if (typeof checkAllDone === "function") checkAllDone();
-    }
-  });
+  c.on("close", () => c._onLost());
+}
+
+// Someone is gone (closed the tab, lost connection, or left)
+function _connLost(c, pIdx) {
+  if (conns[pIdx] !== c) return;   // an abandoned attempt (e.g. replaced by the relay) — not a real disconnect
+  var dName = playerNames[pIdx] || ("Player " + (pIdx + 1));
+  conns[pIdx] = null;
+  if (pIdx === 0 && myIdx !== 0) { _mpReturnToMenu("Host left", "The host disconnected — back to the menu."); return; }
+  _playerGone(pIdx);
+  if (myIdx === 0) sendToAll({ t: "player_left", i: pIdx });
+  showMsg("Player left", dName + " disconnected.", null);
+  setTimeout(hideMsg, 2600);
+}
+// Remove a departed player everywhere: lobby, course, scoreboard, turn logic
+function _playerGone(i) {
+  window._leftPlayers = window._leftPlayers || {};
+  window._leftPlayers[i] = true;
+  playerDone[i] = true;
+  var rp = remotePlayers[i];
+  if (rp) {
+    if (rp.avatarMesh) scene.remove(rp.avatarMesh);
+    if (rp.discMesh) scene.remove(rp.discMesh);
+    if (rp.nameLabel && rp.nameLabel.parentNode) rp.nameLabel.parentNode.removeChild(rp.nameLabel);
+    remotePlayers[i] = null;
+  }
+  if (_lobby3D) { _lobbyDropAvatar(i); _lobbyHud(); }
+  if (typeof updateLobbyUI === "function") updateLobbyUI();
+  if (typeof updateMpUI === "function" && hostGameStarted !== undefined) { try { updateMpUI(); } catch (e) {} }
+  var anyone = conns.some(Boolean);
+  if (myIdx === 0 && !anyone && mpMode) { _mpReturnToMenu("Everyone left", "All other players disconnected."); return; }
+  if (mpMode && typeof checkAllDone === "function") checkAllDone();
+}
+function _mpReturnToMenu(big, sub) {
+  showMsg(big, sub, null);
+  setTimeout(function() {
+    hideMsg();
+    _destroyLobby3D();
+    var wl = document.getElementById("waiting-lobby"); if (wl) wl.remove();
+    _relayStop();
+    if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
+    conns.fill(null); window._leftPlayers = {};
+    mpMode = false; hostGameStarted = false; myIdx = 0; playerCount = 1;
+    phase = "MENU";
+    document.getElementById("ui").style.display = "none";
+    document.getElementById("menu").style.display = "flex";
+    if (typeof menuView === "function") menuView("home");
+    if (typeof showMenuBackdrop === "function") showMenuBackdrop();
+    AudioEngine.playMenu();
+  }, 2600);
 }
 
 function handleMsg(msg) {
   const from = msg.from !== undefined ? msg.from : 1;
+  if (typeof BT !== "undefined" && BT.handle(msg)) return;
+  if (msg.t === "it") { if (typeof PU !== "undefined" && msg.o !== myIdx) PU.onNet(msg); return; }
+  if (msg.t === "lobby_cfg") { BT.mode = msg.mode || BT.mode; BT.items = msg.items || BT.items; if (typeof _lobbyHud === "function") _lobbyHud(); return; }
 
   if (msg.t === "start") {
     if (typeof msg.hostNow === "number") _clockOff = msg.hostNow - Date.now();   // align to the host's clock
@@ -268,6 +328,7 @@ function handleMsg(msg) {
     if (msg.holeCount)  HOLE_COUNT = msg.holeCount;
     if (msg.difficulty) DIFFICULTY = msg.difficulty;
     if (msg.weather) setWeather(msg.weather);
+    BT.mode = msg.mode || "battle"; BT.items = msg.items || "normal"; BT.newMatch();
     const wl = document.getElementById("waiting-lobby");
     if (wl) wl.remove();
     document.getElementById("menu").style.display      = "none";
@@ -322,6 +383,7 @@ function handleMsg(msg) {
       rp.bankArr = [msg.hz || 0];
       rp.spin    = Math.hypot(msg.vx, msg.vz) * 3;
       rp.flying  = true;
+      rp.fire    = !!msg.fire;
     }
 
   } else if (msg.t === "land") {
@@ -347,22 +409,41 @@ function handleMsg(msg) {
       if (typeof _update3DLobbyPlayers === "function") _update3DLobbyPlayers();
     }
 
+  } else if (msg.t === "car") {
+    VEH.applyState(msg);
+  } else if (msg.t === "car_seats") {
+    VEH.applySeats(msg);
+  } else if (msg.t === "car_hit") {
+    if (msg.target === myIdx) BT.receiveHit({ by: from, c: "car", dx: msg.dx, dz: msg.dz, f: Math.min(26, msg.f * 1.1), u: 6 + msg.f * 0.35 });
+    return;
+    if (msg.target === myIdx) VEH.hitMe(msg.dx, msg.dz, msg.f);
+  } else if (msg.t === "car_honk") {
+    AudioEngine.sfx("honk");
+  } else if (msg.t === "ent_hit") {
+    if (myIdx === 0 && msg.h === holeIdx && ENT.list[msg.i]) ENT.launch(ENT.list[msg.i], msg.vx, msg.vy, msg.vz);
+  } else if (msg.t === "pu_take") {
+    if (msg.h === holeIdx && PU.tokens[msg.i] && !PU.tokens[msg.i].taken) PU.takeToken(PU.tokens[msg.i], false);
+  } else if (msg.t === "bat_hit") {
+    if (msg.target === myIdx) PU.batHit(msg.dx, msg.dz);
+  } else if (msg.t === "poop_army") {
+    PU.poopArmy(msg.owner, msg.target, msg.x, msg.z, false);
+    if (msg.target === myIdx) PU.banner("💩 " + (playerNames[msg.owner] || "Someone") + " sent a poop army after you — run!");
+
+  } else if (msg.t === "player_left") {
+    if (msg.i !== myIdx) _playerGone(msg.i);
+
   } else if (msg.t === "lobby_pos") {
-    // Update the remote avatar's position inside the 3D lobby
-    if (_lobby3D && msg.from !== myIdx) {
-      // Find the avatar for this player
-      var _lpAv = null;
-      if (_lobby3D.avatars) {
-        _lobby3D.avatars.forEach(function(av) {
-          if (av && av.playerIdx === msg.from) _lpAv = av;
-        });
-      }
-      if (_lpAv) {
-        _lpAv._netX    = msg.px;
-        _lpAv._netZ    = msg.pz;
-        _lpAv._netYaw  = msg.yaw;
-        _lpAv._netWalk = !!msg.walk;
-      }
+    if (_lobby3D && from !== myIdx) {
+      var _lav = _lobby3D.avatars[from];
+      if (!_lav && from < playerCount) { _update3DLobbyPlayers(); _lav = _lobby3D.avatars[from]; }
+      if (_lav) { _lav.nx = msg.px; _lav.nz = msg.pz; _lav.ny = typeof msg.py === "number" ? msg.py : null; _lav.nyaw = msg.yaw; _lav.nanim = msg.an || (msg.walk ? "walk" : "idle"); }
+    }
+
+  } else if (msg.t === "lobby_bonk") {
+    if (_lobby3D && msg.target === myIdx) {
+      _lobby3D.vel.x = msg.dx * 11; _lobby3D.vel.y = msg.dz * 11; _lobby3D.vy = 6;
+      if (typeof _spawnBonkText === "function") _spawnBonkText(_lobby3D.myPos.clone().add(new THREE.Vector3(0, 2, 0)));
+      AudioEngine.sfx("bonk"); if (typeof _screenShake !== "undefined") { _screenShake = 0.3; _screenShakeT = 0.35; }
     }
 
   } else if (msg.t === "weather_sync") {
@@ -410,7 +491,9 @@ function handleMsg(msg) {
     if (myIdx === 0) hostForceNext();
 
   } else if (msg.t === "game_over") {
-    showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
+    BT._tallyHide();
+    if (BT.on()) { var _w = BT.winner(); showMsg("🏆 " + BT.name(_w) + " WINS!", BT.pts[_w] + " points · " + (_w === myIdx ? "you're the top golfer!" : "you scored " + BT.pts[myIdx]), null); }
+    else showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
     if (typeof PF !== "undefined") PF.matchEnd(msg.totals);
     setTimeout(function() {
       hideMsg();
@@ -438,6 +521,7 @@ function handleMsg(msg) {
   } else if (msg.t === "score" || msg.t === "givenup") {
     playerDone[from]   = true;
     playerThrows[from] = msg.throws;
+    BT.onScore(from, msg.throws, msg.t === "givenup" ? Object.assign({ dnf: 1 }, msg) : msg);
     if (!mpScoreRecorded[from] && HOLES[holeIdx]) {
       mpTotals[from] += msg.throws - HOLES[holeIdx].par;
       mpScoreRecorded[from] = true;
@@ -504,11 +588,13 @@ function checkAllDone() {
   setSpectating(false);
 
   const myT   = playerThrows[myIdx];
-  const sorted = Array.from({ length: playerCount }, (_, i) => ({ i, t: playerThrows[i] })).sort((a, b) => a.t - b.t);
+  const _left = window._leftPlayers || {};
+  const sorted = Array.from({ length: playerCount }, (_, i) => ({ i, t: playerThrows[i] })).filter((r) => !_left[r.i]).sort((a, b) => a.t - b.t);
   const best  = sorted[0];
   const sub   = sorted.map((r) => `${playerNames[r.i].split(" ")[0]}: ${r.t}`).join("  ");
   const big   = best.i === myIdx ? "HOLE WON!" : myT === best.t ? "TIE!" : "HOLE LOST";
-  showMsg(big, sub, null);
+  if (BT.on()) { hideMsg(); BT.tally(); }
+  else showMsg(big, sub, null);
   updateMpUI();
 
   if (myIdx === 0) {
@@ -516,10 +602,13 @@ function checkAllDone() {
       hideMsg();
       const next = holeIdx + 1;
       if (next >= HOLE_COUNT) {
-        // MP game over — inform all
-        sendToAll({ t: "game_over", totals: mpTotals, names: playerNames });
-        showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
-        if (typeof PF !== "undefined") PF.matchEnd(mpTotals);
+        // MP game over — inform all (battle mode: most points wins, so send negated points to the "lowest wins" award)
+        var _tot = BT.on() ? BT.pts.map(function(p) { return -p; }) : mpTotals;
+        sendToAll({ t: "game_over", totals: _tot, names: playerNames });
+        BT._tallyHide();
+        if (BT.on()) { var _w = BT.winner(); showMsg("🏆 " + BT.name(_w) + " WINS!", BT.pts[_w] + " points · " + (_w === myIdx ? "you're the top golfer!" : "you scored " + BT.pts[myIdx]), null); }
+        else showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
+        if (typeof PF !== "undefined") PF.matchEnd(_tot);
         setTimeout(() => {
           hideMsg();
           document.getElementById("menu").style.display = "flex";
@@ -528,6 +617,7 @@ function checkAllDone() {
         }, 4000);
         return;
       }
+      BT._tallyHide();
       holeIdx = next;
       seedRNG(matchSeed + next * 7331);
       HOLES[next] = generateHole(next + 1);
@@ -538,7 +628,7 @@ function checkAllDone() {
         templateLabel: _nextHole ? (_nextHole.templateLabel||"") : "",
       });
       loadHole(next);
-    }, 3500);
+    }, BT.on() ? 6500 : 3500);
   }
   return true;
 }
@@ -546,6 +636,8 @@ function checkAllDone() {
 // ── HOST GAME ────────────────────────────────────────────────────────────────
 // ── LEAVE / RESET MULTIPLAYER ───────────────────────────────────────
 function leaveLobby() {
+  conns.forEach(function(c) { if (c && c.open) { try { c.send(JSON.stringify({ t: "bye" })); } catch (e) {} } });
+  window._leftPlayers = {};
   _relayStop();
   if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
   conns.fill(null);
@@ -567,355 +659,213 @@ function leaveLobby() {
 // ═══════════════════════════════════════════════════════════════════
 // ── 3D LOBBY — island scene with WASD movement + punch ──────────────
 // ═══════════════════════════════════════════════════════════════════
-var _lobby3D = null;  // { renderer, scene, camera, rafId, avatars, myAvatar, ... }
+var _lobby3D = null;  // { overlay, group, avatars: {idx: av}, me, ... } — lives in the main game scene
 
+// ══════════════════════════════════════════════════════════════════════
+// ── LOBBY — everyone hangs out on the menu island until the host starts
+// Uses the main renderer + the menu lagoon (no second WebGL context).
+// ══════════════════════════════════════════════════════════════════════
+var LOBBY_R = 7.6, LOBBY_Y = function() { return -1.5 + ISLAND_TOP; };
 function _build3DLobby(container) {
   if (typeof THREE === "undefined") return;
-
-  var lRen = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  lRen.outputEncoding = THREE.sRGBEncoding;
-  lRen.toneMapping = THREE.ACESFilmicToneMapping;
-  lRen.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  lRen.setSize(window.innerWidth, window.innerHeight);
-  lRen.setClearColor(0xbfe4f5, 1);
-  container.appendChild(lRen.domElement);
-
-  var lScn = new THREE.Scene();
-  lScn.fog = new THREE.FogExp2(0xbfe4f5, 0.010);
-
-  // Sky
-  var _lSkyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { c1:{ value: new THREE.Color(0xd2ecfb) }, c2:{ value: new THREE.Color(0x3a8fe0) } },
-    vertexShader:"varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}",
-    fragmentShader:"uniform vec3 c1;uniform vec3 c2;varying vec3 vP;void main(){float t=clamp(vP.y/220.,0.,1.);gl_FragColor=vec4(mix(c1,c2,t*t),1.);gl_FragColor=linearToOutputTexel(gl_FragColor);}"
-  });
-  var _lSkyGeo = new THREE.SphereGeometry(360,24,12);   // inside the lobby camera's far plane (400)
-  lScn.add(new THREE.Mesh(_lSkyGeo, _lSkyMat));
-
-  // Lighting
-  lScn.add(new THREE.AmbientLight(0xffffff, 0.55));
-  var lSun = new THREE.DirectionalLight(0xffd580, 1.3);
-  lSun.position.set(20,40,20); lScn.add(lSun);
-  lScn.add(new THREE.HemisphereLight(0xff8800, 0x332200, 0.4));
-
-  // Island
-  var iTop = new THREE.Mesh(new THREE.CylinderGeometry(8,8,0.6,18), new THREE.MeshLambertMaterial({color:0x6a8c3a}));
-  iTop.position.y=0.3; iTop.receiveShadow=true; lScn.add(iTop);
-  var iBody = new THREE.Mesh(new THREE.CylinderGeometry(8,6,4,16), new THREE.MeshLambertMaterial({color:0x4a2a00}));
-  iBody.position.y = -2; lScn.add(iBody);
-  // Grass tufts
-  var gM = new THREE.MeshLambertMaterial({color:0x5a9a2a});
-  for (var gi=0; gi<14; gi++) {
-    var ga=gi/14*Math.PI*2, gr=3+Math.random()*4;
-    var gt=new THREE.Mesh(new THREE.ConeGeometry(.16,.5,4),gM);
-    gt.position.set(Math.cos(ga)*gr,.65,Math.sin(ga)*gr); gt.rotation.y=Math.random()*Math.PI; lScn.add(gt);
-  }
-  // Torches
-  var _tFlames=[];
-  for (var ti=0; ti<3; ti++) {
-    var ta=ti/3*Math.PI*2;
-    var tL=new THREE.PointLight([0xff6600,0xff8800,0xffcc00][ti], 1.2, 14);
-    tL.position.set(Math.cos(ta)*7, 1.6, Math.sin(ta)*7); lScn.add(tL);
-    var tPole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,1.3,6), new THREE.MeshLambertMaterial({color:0x8b5200}));
-    tPole.position.set(Math.cos(ta)*7, .65, Math.sin(ta)*7); lScn.add(tPole);
-    var tFlame=new THREE.Mesh(new THREE.SphereGeometry(.2,6,4), new THREE.MeshBasicMaterial({color:[0xff6600,0xff8800,0xffcc00][ti]}));
-    tFlame.position.set(Math.cos(ta)*7, 1.3, Math.sin(ta)*7); lScn.add(tFlame);
-    _tFlames.push(tFlame);
-  }
-
-  var lCam = new THREE.PerspectiveCamera(58, window.innerWidth/window.innerHeight, 0.1, 400);
-  lCam.position.set(0, 7, 14); lCam.lookAt(0,1,0);
-
-  // Overlay
-  var _ov = document.createElement("div");
-  _ov.id = "lobby3d-overlay";
-  _ov.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:10;";
-  container.appendChild(_ov);
-
-  // Key state for lobby WASD
-  var _lKeys = {};
-  var _lKeyDown = function(e){ _lKeys[e.key]=true; };
-  var _lKeyUp   = function(e){ _lKeys[e.key]=false; };
-  document.addEventListener("keydown", _lKeyDown);
-  document.addEventListener("keyup",   _lKeyUp);
-
-  // My local avatar position + look angle in lobby
-  var _myLobbyPos = new THREE.Vector3(0, 0.65, 0);
-  var _myLobbyYaw = 0;
-  var _myLobbyPunchCd = 0;
-
-  _lobby3D = {
-    renderer: lRen, scene: lScn, camera: lCam,
-    overlay: _ov, avatars: [], myAvatar: null, torchFlames: _tFlames,
-    T: 0, rafId: null,
-    keys: _lKeys,
-    myPos: _myLobbyPos, myYaw: _myLobbyYaw,
-    punchCd: 0,
-    keyDown: _lKeyDown, keyUp: _lKeyUp,
-  };
-
-  _lobby3D.onResize = function() {
-    lRen.setSize(window.innerWidth, window.innerHeight);
-    lCam.aspect = window.innerWidth/window.innerHeight;
-    lCam.updateProjectionMatrix();
-  };
-  window.addEventListener("resize", _lobby3D.onResize);
-
-  function _lobbyLoop() {
-    if (!_lobby3D) return;
-    _lobby3D.rafId = requestAnimationFrame(_lobbyLoop);
-    var dt = Math.min(0.05, 1/60);
-    _lobby3D.T += dt;
-    var T = _lobby3D.T;
-    var k = _lobby3D.keys;
-    var ISLAND_R = 7.2;
-
-    // ── TICK ALL GLB ANIMATION MIXERS — required for walk/idle animations ──
-    if (typeof _glbMixers !== "undefined") {
-      _glbMixers.forEach(function(m){ m.update(dt); });
-    }
-
-    // ── LOCAL PLAYER MOVEMENT — camera-relative WASD ──────────────────
-    // Camera sits at (18,14,18) looking at origin — 45° diagonal corner.
-    // Forward (away from camera) = (-1/√2, 0, -1/√2); right = (+1/√2, 0, -1/√2).
-    var _moveSpd = 5.5 * dt;
-    var _f = _moveSpd * 0.7071;  // per-axis component for 45° camera
-    var _prevX = _myLobbyPos.x, _prevZ = _myLobbyPos.z;
-
-    if (k["w"]||k["W"]) { _myLobbyPos.x -= _f; _myLobbyPos.z -= _f; }  // away from camera
-    if (k["s"]||k["S"]) { _myLobbyPos.x += _f; _myLobbyPos.z += _f; }  // toward camera
-    if (k["a"]||k["A"]) { _myLobbyPos.x -= _f; _myLobbyPos.z += _f; }  // camera left
-    if (k["d"]||k["D"]) { _myLobbyPos.x += _f; _myLobbyPos.z -= _f; }  // camera right
-
-    // Clamp to island
-    var _pd = Math.hypot(_myLobbyPos.x, _myLobbyPos.z);
-    if (_pd > ISLAND_R - 0.5) {
-      _myLobbyPos.x = _myLobbyPos.x / _pd * (ISLAND_R - 0.5);
-      _myLobbyPos.z = _myLobbyPos.z / _pd * (ISLAND_R - 0.5);
-    }
-    _myLobbyPos.y = 0.65;
-
-    // ── VELOCITY-BASED WALK ANIMATION — same hysteresis as singleplayer ──
-    var _dvx = (_myLobbyPos.x - _prevX) / dt;
-    var _dvz = (_myLobbyPos.z - _prevZ) / dt;
-    if (!_lobby3D._velX) _lobby3D._velX = 0;
-    if (!_lobby3D._velZ) _lobby3D._velZ = 0;
-    var _vs = Math.min(1, 14*dt);
-    _lobby3D._velX += (_dvx - _lobby3D._velX) * _vs;
-    _lobby3D._velZ += (_dvz - _lobby3D._velZ) * _vs;
-    var _curVel  = Math.hypot(_lobby3D._velX, _lobby3D._velZ);
-    var _wasWalk = (_lobby3D.myAvatar && _lobby3D.myAvatar.userData.isMoving) || false;
-    var _wlk     = _wasWalk ? (_curVel > 0.18) : (_curVel > 0.50);
-
-    if (_lobby3D.myAvatar && _lobby3D.myAvatar.userData.glbLoaded && _wlk !== _wasWalk) {
-      _lobby3D.myAvatar.userData.isMoving = _wlk;
-      if (typeof switchAvatarAnim === "function")
-        switchAvatarAnim(_lobby3D.myAvatar, _wlk ? "walk" : "idle");
-    }
-    // On first GLB load, start idle
-    if (_lobby3D.myAvatar && _lobby3D.myAvatar.userData.glbLoaded && !_lobby3D._myAnimStarted) {
-      _lobby3D._myAnimStarted = true;
-      if (typeof switchAvatarAnim === "function") switchAvatarAnim(_lobby3D.myAvatar, "idle");
-    }
-
-    // ── AVATAR YAW: face movement direction ─────────────────────────────
-    var _movDirX = _myLobbyPos.x - _prevX, _movDirZ = _myLobbyPos.z - _prevZ;
-    if (Math.hypot(_movDirX, _movDirZ) > 0.001) {
-      var _tYaw = Math.atan2(_movDirX, _movDirZ);
-      var _dYaw = _tYaw - _myLobbyYaw;
-      while (_dYaw >  Math.PI) _dYaw -= Math.PI * 2;
-      while (_dYaw < -Math.PI) _dYaw += Math.PI * 2;
-      _myLobbyYaw += _dYaw * Math.min(1, 16*dt);
-    }
-
-    if (_lobby3D.myAvatar) {
-      _lobby3D.myAvatar.position.copy(_myLobbyPos);
-      _lobby3D.myAvatar.rotation.y = _myLobbyYaw;
-    }
-
-    // ── Broadcast position to all lobby peers (~20Hz) ─────────────────
-    _lobby3D._posBroadcastAcc = (_lobby3D._posBroadcastAcc || 0) + dt;
-    if (_lobby3D._posBroadcastAcc >= 0.05) {
-      _lobby3D._posBroadcastAcc = 0;
-      var _isWalking = (_lobby3D.myAvatar && _lobby3D.myAvatar.userData.isMoving) || false;
-      if (typeof sendToAll === "function") {
-        sendToAll({ t: "lobby_pos",
-          px: Math.round(_myLobbyPos.x * 100) / 100,
-          pz: Math.round(_myLobbyPos.z * 100) / 100,
-          yaw: Math.round(_myLobbyYaw * 100) / 100,
-          walk: _isWalking ? 1 : 0
-        });
-      }
-    }
-
-    // ── LOBBY PUNCH (R key) ────────────────────────────────────────────────
-    if (_lobby3D.punchCd > 0) _lobby3D.punchCd -= dt;
-    if ((k["r"]||k["R"]) && _lobby3D.punchCd <= 0) {
-      _lobby3D.punchCd = 1.2;
-      k["r"] = k["R"] = false;
-      var _bRange = 5.0, _bIdx = -1;
-      _lobby3D.avatars.forEach(function(av, i) {
-        if (!av || !av.mesh) return;
-        var _d = _myLobbyPos.distanceTo(av.mesh.position);
-        if (_d < _bRange) { _bRange = _d; _bIdx = i; }
-      });
-      if (_bIdx >= 0) {
-        var _tgt = _lobby3D.avatars[_bIdx];
-        var _ddx = _tgt.mesh.position.x - _myLobbyPos.x;
-        var _ddz = _tgt.mesh.position.z - _myLobbyPos.z;
-        var _dl = Math.hypot(_ddx, _ddz) || 1;
-        _tgt._knockVelX = (_ddx/_dl) * 9;
-        _tgt._knockVelZ = (_ddz/_dl) * 9;
-        _tgt._stagger = 0.9;
-        if (typeof _spawnBonkText === "function") _spawnBonkText(_tgt.mesh.position.clone());
-      }
-    }
-
-    // ── REMOTE LOBBY AVATARS — driven by lobby_pos messages ─────────────
-    _lobby3D.avatars.forEach(function(av, i) {
-      if (!av || !av.mesh) return;
-
-      // Smooth lerp toward last received network position
-      if (av._netX !== undefined) {
-        av.mesh.position.x += (av._netX - av.mesh.position.x) * Math.min(1, 12*dt);
-        av.mesh.position.z += (av._netZ - av.mesh.position.z) * Math.min(1, 12*dt);
-        av.mesh.position.y = 0.65;
-      }
-      // Smooth yaw
-      if (av._netYaw !== undefined) {
-        var _rdy = av._netYaw - (av._smoothYaw || av._netYaw);
-        while (_rdy >  Math.PI) _rdy -= Math.PI*2;
-        while (_rdy < -Math.PI) _rdy += Math.PI*2;
-        av._smoothYaw = (av._smoothYaw || av._netYaw) + _rdy * Math.min(1, 12*dt);
-        av.mesh.rotation.y = av._smoothYaw;
-      }
-      // Walk animation driven by network walk flag
-      if (av.mesh.userData.glbLoaded) {
-        var _rWant = av._netWalk ? "walk" : "idle";
-        if (av._lastAnim !== _rWant) {
-          av._lastAnim = _rWant;
-          if (typeof switchAvatarAnim === "function") switchAvatarAnim(av.mesh, _rWant);
-        }
-      }
-
-      // Knockback
-      if (Math.abs(av._knockVelX||0) > 0.01 || Math.abs(av._knockVelZ||0) > 0.01) {
-        av.mesh.position.x += (av._knockVelX||0) * dt;
-        av.mesh.position.z += (av._knockVelZ||0) * dt;
-        av._knockVelX = (av._knockVelX||0) * (1 - 8*dt);
-        av._knockVelZ = (av._knockVelZ||0) * (1 - 8*dt);
-        var _pd2 = Math.hypot(av.mesh.position.x, av.mesh.position.z);
-        if (_pd2 > ISLAND_R-0.5) {
-          av.mesh.position.x = av.mesh.position.x/_pd2*(ISLAND_R-0.5);
-          av.mesh.position.z = av.mesh.position.z/_pd2*(ISLAND_R-0.5);
-        }
-        av.mesh.position.y = 0.65;
-      }
-      if (av._stagger > 0) {
-        av._stagger -= dt;
-        av.mesh.rotation.z = Math.sin(av._stagger*25) * (av._stagger/0.9) * 0.8;
-      } else {
-        av.mesh.rotation.z *= 0.85;
-      }
-      // Project name label
-      if (av.nameLabel) {
-        var _wp = av.mesh.position.clone().add(new THREE.Vector3(0, 2.2, 0));
-        _wp.project(lCam);
-        if (_wp.z < 1) {
-          av.nameLabel.style.left = ((_wp.x*.5+.5)*window.innerWidth)+"px";
-          av.nameLabel.style.top  = ((-_wp.y*.5+.5)*window.innerHeight-5)+"px";
-          av.nameLabel.style.display = "block";
-        } else { av.nameLabel.style.display = "none"; }
-      }
-    });
-
-    // Flame flicker
-    _lobby3D.torchFlames.forEach(function(f,i){ f.scale.setScalar(0.9+Math.sin(T*8+i*2.1)*0.12); });
-
-    // ── CAMERA — static elevated corner view of the full island ────────
-    lCam.position.set(18, 14, 18);
-    lCam.lookAt(0, 1, 0);
-    lRen.render(lScn, lCam);
-  }
-  _lobbyLoop();
+  if (_lobby3D) _destroyLobby3D();
+  if (typeof showMenuBackdrop === "function" && !_menuBackdrop) showMenuBackdrop();
+  container.style.pointerEvents = "none";
+  var ov = document.createElement("div"); ov.id = "lobby3d-overlay"; ov.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  container.appendChild(ov);
+  var grp = new THREE.Group(); scene.add(grp);
+  _lobby3D = { overlay: ov, group: grp, avatars: {}, me: null, T: 0, camYaw: 0.65,
+    myPos: new THREE.Vector3(Math.cos(myIdx * 1.3) * 3, LOBBY_Y(), Math.sin(myIdx * 1.3) * 3 + 1), myYaw: 0, vy: 0, vel: new THREE.Vector2(), punchCd: 0, sendAcc: 0, decor: [] };
+  _lobbyDecor(grp);
   _update3DLobbyPlayers();
+}
+// Bunting, balloons and a glowing welcome ring around the basket
+function _lobbyDecor(grp) {
+  var y = LOBBY_Y(), cols = [0xff5a8a, 0xffd23a, 0x3ab0ff, 0x8ae05a, 0xb46aff, 0xff8a3a];
+  // poles + bunting
+  var poles = 6, pts = [];
+  for (var i = 0; i < poles; i++) {
+    var a = i / poles * Math.PI * 2 + 0.3, x = Math.cos(a) * 8.2, z = Math.sin(a) * 8.2;
+    var pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.2, 8), new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.6 }));
+    pole.position.set(x, y + 1.6, z); pole.castShadow = true; grp.add(pole);
+    pts.push(new THREE.Vector3(x, y + 3.1, z));
+  }
+  for (var k = 0; k < poles; k++) {
+    var A = pts[k], B = pts[(k + 1) % poles];
+    for (var f = 1; f < 9; f++) {
+      var t = f / 9, sag = Math.sin(t * Math.PI) * 0.55;
+      var flag = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.36, 3), new THREE.MeshStandardMaterial({ color: cols[(k * 9 + f) % cols.length], roughness: 0.7, side: THREE.DoubleSide }));
+      flag.position.set(A.x + (B.x - A.x) * t, A.y - sag - 0.2, A.z + (B.z - A.z) * t); flag.rotation.x = Math.PI; flag.rotation.y = Math.atan2(B.x - A.x, B.z - A.z);
+      grp.add(flag);
+    }
+  }
+  // balloons tied around the island, bobbing
+  for (var bI = 0; bI < 8; bI++) {
+    var ba = bI / 8 * Math.PI * 2, bx = Math.cos(ba) * 6.9, bz = Math.sin(ba) * 6.9;
+    var bal = new THREE.Group(); bal.position.set(bx, y, bz); grp.add(bal);
+    var ball = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), new THREE.MeshPhysicalMaterial({ color: cols[bI % cols.length], roughness: 0.25, clearcoat: 1 }));
+    ball.scale.y = 1.18; ball.position.y = 2.6 + (bI % 3) * 0.35; bal.add(ball);
+    var str = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, ball.position.y - 0.4, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    str.position.y = (ball.position.y - 0.4) / 2; bal.add(str);
+    _lobby3D.decor.push({ o: ball, ph: bI });
+  }
+  // glowing ring on the ground marking the hangout area
+  var ring = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.15, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = y + 0.03; grp.add(ring); _lobby3D.ring = ring;
 }
 
 function _update3DLobbyPlayers() {
   if (!_lobby3D) return;
-  var cols = [0x00ffff, 0xff00ff, 0xffff00, 0xff6600, 0x00ff88];
-  var hexCols = ["#00ffff","#ff00ff","#ffff00","#ff6600","#00ff88"];
-
-  // Remove old
-  _lobby3D.avatars.forEach(function(av) {
-    if (av && av.mesh) _lobby3D.scene.remove(av.mesh);
-    if (av && av.nameLabel) av.nameLabel.remove();
-  });
-  _lobby3D.avatars = [];
-  if (_lobby3D.myAvatar) { _lobby3D.scene.remove(_lobby3D.myAvatar); _lobby3D.myAvatar = null; }
-
-  // Build my avatar (placed at current pos)
-  var _myCol = cols[myIdx % cols.length];
-  if (typeof buildPlayerAvatar === "function") {
-    _lobby3D.myAvatar = buildPlayerAvatar(myIdx, _myCol);
-  } else {
-    _lobby3D.myAvatar = _makeFallbackAvatar(_myCol);
-  }
-  _lobby3D.myAvatar.scale.setScalar(1.0);
-  _lobby3D.myAvatar.position.copy(_lobby3D.myPos);
-  _lobby3D.scene.add(_lobby3D.myAvatar);
-
-  // Remote players
+  var L = _lobby3D, keep = {};
+  // me
+  if (!L.me) { L.me = buildPlayerAvatar(myIdx, PLAYER_COLORS[myIdx % PLAYER_COLORS.length]); L.group.add(L.me); L.meLabel = _lobbyLabel(myIdx, true); }
+  // everyone else who is in the match
   for (var i = 0; i < playerCount; i++) {
-    if (i === myIdx) continue;
-    var _initAngle = (i / Math.max(playerCount, 2)) * Math.PI * 2;
-    var av = {
-      mesh: null, nameLabel: null, playerIdx: i,
-      _knockVelX: 0, _knockVelZ: 0, _stagger: 0,
-      _netX: Math.cos(_initAngle)*3.5, _netZ: Math.sin(_initAngle)*3.5,
-      _netYaw: _initAngle + Math.PI/2, _netWalk: false,
-      _smoothYaw: _initAngle + Math.PI/2
-    };
-    if (typeof buildPlayerAvatar === "function") {
-      av.mesh = buildPlayerAvatar(i, cols[i % cols.length]);
-    } else {
-      av.mesh = _makeFallbackAvatar(cols[i % cols.length]);
+    if (i === myIdx || (window._leftPlayers && window._leftPlayers[i])) continue;
+    keep[i] = true;
+    var av = L.avatars[i];
+    if (av && av.skin !== ((window._remoteSkins || {})[i] || "default") + JSON.stringify((window._remoteCos || {})[i] || null)) { _lobbyDropAvatar(i); av = null; }
+    if (!av) {
+      var ang = i * 1.3 + 0.5;
+      av = L.avatars[i] = { idx: i, x: Math.cos(ang) * 3.2, z: Math.sin(ang) * 3.2 + 1, y: LOBBY_Y(), yaw: 0, nx: null, nz: null, ny: null, nyaw: null, walk: false,
+        skin: ((window._remoteSkins || {})[i] || "default") + JSON.stringify((window._remoteCos || {})[i] || null) };
+      av.mesh = buildPlayerAvatar(i, PLAYER_COLORS[i % PLAYER_COLORS.length]);
+      av.mesh.position.set(av.x, av.y, av.z); L.group.add(av.mesh);
+      av.label = _lobbyLabel(i, false);
+      if (typeof spawnParticleBurst === "function") spawnParticleBurst(new THREE.Vector3(av.x, av.y + 1.5, av.z), new THREE.Color(PLAYER_COLORS[i % PLAYER_COLORS.length]), 26);
+      if (typeof AudioEngine !== "undefined") AudioEngine.sfx("pickup");
     }
-    av.mesh.scale.setScalar(1.0);
-    av.mesh.position.set(av._netX, 0.65, av._netZ);
-    _lobby3D.scene.add(av.mesh);
-    // Name label
-    var nl = document.createElement("div");
-    nl.className = "lobby-name";
-    nl.style.boxShadow = "inset 3px 0 0 " + hexCols[i % hexCols.length];
-    nl.textContent = (playerNames[i]||("P"+(i+1))) + (i===0?" 👑":"") + (i===myIdx?" ◀":"");
-    _lobby3D.overlay.appendChild(nl);
-    av.nameLabel = nl;
-    _lobby3D.avatars.push(av);
+    if (av.label) av.label.textContent = (playerNames[i] || ("Player " + (i + 1))) + (i === 0 ? " 👑" : "");
   }
-
-  // Refresh HUD overlay
-  var rawCode = (myIdx === 0 ? (typeof _hostRawCode !== "undefined" && _hostRawCode) : window._joinedCode) || "------";
-  rawCode = rawCode.toUpperCase();
-  var isHost  = myIdx === 0;
-  var _oldHud = _lobby3D.overlay.querySelector("#lobby3d-hud");
-  if (_oldHud) _oldHud.remove();
-  var hud = document.createElement("div");
-  hud.id = "lobby3d-hud";
-  hud.innerHTML =
-    "<div class='sheet'>" +
-    "<span class='k'>Share this code</span>" +
-    "<div class='code' onclick='copyCode()' title='Click to copy'>" + rawCode + "</div>" +
-    "<div class='lobby-meta'>" + playerCount + " / " + MAX_PLAYERS + " players · walk with WASD · R to bonk</div>" +
-    "<div class='lobby-actions'>" +
-    (isHost && playerCount >= 2
-      ? "<button class='btn primary big block' onclick='hostStartGame()'>Start game</button>"
-      : "<div class='status'>" + (isHost ? "Waiting for players…" : "Waiting for the host to start…") + "</div>") +
-    "<button class='btn block' onclick='leaveLobby()'>Leave</button>" +
-    "</div></div>";
-  _lobby3D.overlay.appendChild(hud);
+  Object.keys(L.avatars).forEach(function(k) { if (!keep[k]) _lobbyDropAvatar(+k); });
+  if (L.meLabel) L.meLabel.textContent = (playerNames[myIdx] || "You") + (myIdx === 0 ? " 👑" : "") + " · you";
+  _lobbyHud();
 }
+function _lobbyDropAvatar(i) {
+  var L = _lobby3D, av = L && L.avatars[i]; if (!av) return;
+  if (av.mesh) { L.group.remove(av.mesh); _lobbyStopMixers(av.mesh); }
+  if (av.label) av.label.remove();
+  delete L.avatars[i];
+}
+function _lobbyStopMixers(mesh) {
+  if (typeof _glbMixers === "undefined" || !mesh) return;
+  var ms = []; mesh.traverse(function(c) { if (c.userData && c.userData.mixer) ms.push(c.userData.mixer); });
+  if (ms.length) _glbMixers = _glbMixers.filter(function(m) { return ms.indexOf(m) < 0; });
+}
+function _lobbyLabel(i, me) {
+  var nl = document.createElement("div");
+  nl.className = "lobby-name" + (me ? " me" : "");
+  nl.style.boxShadow = "inset 3px 0 0 #" + PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, "0");
+  _lobby3D.overlay.appendChild(nl);
+  return nl;
+}
+function _lobbyHud() {
+  var L = _lobby3D; if (!L) return;
+  var rawCode = ((myIdx === 0 ? _hostRawCode : window._joinedCode) || "------").toUpperCase(), isHost = myIdx === 0;
+  var old = L.overlay.querySelector("#lobby3d-hud"); if (old) old.remove();
+  var present = [];
+  for (var i = 0; i < playerCount; i++) if (!(window._leftPlayers && window._leftPlayers[i])) present.push(i);
+  var list = present.map(function(i) {
+    var sk = (typeof PLAYER_SKINS !== "undefined") ? PLAYER_SKINS.find(function(p) { return p.id === (i === myIdx ? equippedPlayerSkin : ((window._remoteSkins || {})[i] || "default")); }) : null;
+    return "<div class='lb-p'><span class='dot' style='background:#" + PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, "0") + "'></span><b>" +
+      (playerNames[i] || ("Player " + (i + 1))).replace(/</g, "&lt;") + "</b><span>" + (sk ? sk.icon + " " + sk.name : "") + (i === 0 ? " · host" : "") + (i === myIdx ? " · you" : "") + "</span></div>";
+  }).join("");
+  var hud = document.createElement("div"); hud.id = "lobby3d-hud";
+  hud.innerHTML = "<div class='sheet'>" +
+    "<div class='lb-head'><div><span class='k'>Lobby code</span><div class='code' onclick='copyCode()' title='Click to copy'>" + rawCode + "</div></div>" +
+    "<div class='lb-count'><b>" + present.length + "</b>/" + MAX_PLAYERS + "<span>players</span></div></div>" +
+    "<div class='lb-list'>" + list + "</div>" +
+    "<div class='lb-k'>Mode</div><div class='lb-mode'>" +
+      [["battle", "⚔️ Battle", "Everyone at once — points, knockouts, items"], ["classic", "⛳ Classic", "Fewest throws wins"]].map(function(o) { return "<button" + (BT.mode === o[0] ? " class='on'" : "") + (isHost ? " onclick='_lobbySet(\"mode\",\"" + o[0] + "\")'" : " disabled") + " title='" + o[2] + "'>" + o[1] + "</button>"; }).join("") + "</div>" +
+    "<div class='lb-k'>Items</div><div class='lb-mode'>" +
+      [["off", "Off"], ["normal", "Normal"], ["chaos", "🔥 Chaos"]].map(function(o) { return "<button" + (BT.items === o[0] ? " class='on'" : "") + (isHost ? " onclick='_lobbySet(\"items\",\"" + o[0] + "\")'" : " disabled") + ">" + o[1] + "</button>"; }).join("") + "</div>" +
+    "<div class='lobby-meta'><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Space</kbd> jump · <kbd>R</kbd> bonk</div>" +
+    "<div class='lobby-actions'>" +
+    (isHost && present.length >= 2 ? "<button class='btn primary big block' onclick='hostStartGame()'>Start game</button>"
+      : "<div class='status'>" + (isHost ? "Share the code — waiting for players…" : "Waiting for the host to start…") + "</div>") +
+    "<button class='btn block' onclick='openProfile(\"character\")'>Change look</button>" +
+    "<button class='btn block ghost' onclick='leaveLobby()'>Leave</button></div></div>";
+  L.overlay.appendChild(hud);
+  if (typeof _lobbyMobileControls === "function") _lobbyMobileControls();
+}
+
+function _lobbySet(k, v) {
+  BT[k] = v;
+  if (myIdx === 0) sendToAll({ t: "lobby_cfg", mode: BT.mode, items: BT.items });
+  _lobbyHud();
+}
+// Called from the main loop while the lobby is open
+function _lobbyTick(dt) {
+  var L = _lobby3D; if (!L) return;
+  L.T += dt;
+  var y0 = LOBBY_Y(), cy = L.camYaw;
+  // ── me: camera-relative movement, jump, island bounds, basket pole ──
+  var f = 0, r = 0;
+  if (keys.w || keys.W) f += 1; if (keys.s || keys.S) f -= 1; if (keys.d || keys.D) r += 1; if (keys.a || keys.A) r -= 1;
+  if (typeof PL !== "undefined" && PL.stick.active) { f = -PL.stick.y; r = PL.stick.x; }
+  var l = Math.hypot(f, r); if (l > 1) { f /= l; r /= l; }
+  var spd = keys.Shift ? 7 : 4.6, fx = Math.sin(cy), fz = -Math.cos(cy);
+  var tx = (fx * f + Math.cos(cy) * r) * spd, tz = (fz * f + Math.sin(cy) * r) * spd;
+  L.vel.x += (tx - L.vel.x) * Math.min(1, dt * 12); L.vel.y += (tz - L.vel.y) * Math.min(1, dt * 12);
+  var p = L.myPos; p.x += L.vel.x * dt; p.z += L.vel.y * dt;
+  var d = Math.hypot(p.x, p.z); if (d > LOBBY_R) { p.x *= LOBBY_R / d; p.z *= LOBBY_R / d; }
+  if (d < 0.75) { p.x *= 0.75 / (d || 1); p.z *= 0.75 / (d || 1); }
+  var ground = y0;
+  if ((keys[" "] || (typeof PL !== "undefined" && PL.jumpHeld)) && p.y <= ground + 0.01) { L.vy = 7; AudioEngine.sfx("jump"); }
+  L.vy -= 21 * dt; p.y += L.vy * dt; if (p.y < ground) { p.y = ground; L.vy = 0; }
+  var hs = Math.hypot(L.vel.x, L.vel.y);
+  if (hs > 0.3) { var ty = Math.atan2(L.vel.x, L.vel.y), dy = ty - L.myYaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2; L.myYaw += dy * Math.min(1, dt * 12); }
+  var anim = p.y > ground + 0.05 ? "jump" : hs > 5 ? "sprint" : hs > 0.4 ? "walk" : "idle";
+  if (L.me) {
+    var fl = (typeof _playerFeetLift === "function") ? _playerFeetLift(myIdx) : 0;
+    L.me.position.set(p.x, p.y + fl, p.z); L.me.rotation.y = L.myYaw;
+    if (L.me.userData.glbLoaded && L.meAnim !== anim) { L.meAnim = anim; switchAvatarAnim(L.me, anim); }
+    if (typeof COS !== "undefined") COS.auraStep(L.me, p, hs, dt);
+  }
+  // bonk the nearest player (they feel it on their screen)
+  if (L.punchCd > 0) L.punchCd -= dt;
+  if ((keys.r || keys.R) && L.punchCd <= 0) {
+    L.punchCd = 1.0; keys.r = keys.R = false;
+    var best = null, bd = 2.6;
+    Object.keys(L.avatars).forEach(function(k) { var av = L.avatars[k], dd = Math.hypot(av.x - p.x, av.z - p.z); if (dd < bd) { bd = dd; best = av; } });
+    if (best) {
+      var nx = (best.x - p.x) / (bd || 1), nz = (best.z - p.z) / (bd || 1);
+      sendToAll({ t: "lobby_bonk", target: best.idx, dx: nx, dz: nz });
+      if (typeof _spawnBonkText === "function") _spawnBonkText(new THREE.Vector3(best.x, best.y + 2, best.z));
+      AudioEngine.sfx("bonk");
+    }
+  }
+  // network: my position ~15 Hz
+  L.sendAcc += dt;
+  if (L.sendAcc > 0.066) { L.sendAcc = 0; sendToAll({ t: "lobby_pos", px: Math.round(p.x * 100) / 100, py: Math.round(p.y * 100) / 100, pz: Math.round(p.z * 100) / 100, yaw: Math.round(L.myYaw * 100) / 100, an: anim }); }
+  // ── others: glide toward their last network position ──
+  Object.keys(L.avatars).forEach(function(k) {
+    var av = L.avatars[k]; if (av.nx === null) return;
+    var kk = Math.min(1, dt * 12);
+    av.x += (av.nx - av.x) * kk; av.z += (av.nz - av.z) * kk; av.y += ((av.ny === null ? y0 : av.ny) - av.y) * kk;
+    var dy2 = av.nyaw - av.yaw; while (dy2 > Math.PI) dy2 -= Math.PI * 2; while (dy2 < -Math.PI) dy2 += Math.PI * 2; av.yaw += dy2 * kk;
+    var fl2 = (typeof _playerFeetLift === "function") ? _playerFeetLift(av.idx) : 0;
+    av.mesh.position.set(av.x, av.y + fl2, av.z); av.mesh.rotation.y = av.yaw;
+    if (av.mesh.userData.glbLoaded && av.anim !== av.nanim) { av.anim = av.nanim; switchAvatarAnim(av.mesh, av.anim || "idle"); }
+  });
+  // ── decor ──
+  L.decor.forEach(function(b) { b.o.position.y = 2.6 + (b.ph % 3) * 0.35 + Math.sin(L.T * 1.3 + b.ph) * 0.12; });
+  if (L.ring) { var s = 1 + Math.sin(L.T * 2) * 0.04; L.ring.scale.set(s, s, s); L.ring.material.opacity = 0.35 + Math.sin(L.T * 2) * 0.15; }
+  // ── camera: gentle orbit behind the island, follows me a little ──
+  L.camYaw = 0.65 + Math.sin(L.T * 0.08) * 0.12;
+  var cd = 12.5;
+  camera.position.set(p.x * 0.35 - Math.sin(L.camYaw) * cd, y0 + 6.2, p.z * 0.35 + Math.cos(L.camYaw) * cd);
+  camera.lookAt(p.x * 0.35, y0 + 1.2, p.z * 0.35);
+  // ── labels ──
+  var proj = function(el, v3) {
+    if (!el) return; var v = v3.clone(); v.y += 2.15; v.project(camera);
+    if (v.z > 1) { el.style.display = "none"; return; }
+    el.style.display = "block"; el.style.left = ((v.x * 0.5 + 0.5) * window.innerWidth) + "px"; el.style.top = ((-v.y * 0.5 + 0.5) * window.innerHeight) + "px";
+  };
+  proj(L.meLabel, p);
+  Object.keys(L.avatars).forEach(function(k) { var av = L.avatars[k]; proj(av.label, new THREE.Vector3(av.x, av.y, av.z)); });
+}
+function _lobbyMobileControls() {}
 
 function _makeFallbackAvatar(color) {
   var g = new THREE.Group();
@@ -924,42 +874,17 @@ function _makeFallbackAvatar(color) {
   h.position.y=1.62; g.add(h);
   var t = new THREE.Mesh(new THREE.CylinderGeometry(.13,.15,.5,6), bM);
   t.position.y=1.1; g.add(t);
-  var l = new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.42,4), bM);
-  l.position.set(-.1,.49,0); g.add(l);
-  var r = new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.42,4), bM);
-  r.position.set(.1,.49,0); g.add(r);
   return g;
 }
 
 function _destroyLobby3D() {
   if (!_lobby3D) return;
-  if (_lobby3D.rafId) cancelAnimationFrame(_lobby3D.rafId);
-  if (_lobby3D.keyDown) document.removeEventListener("keydown", _lobby3D.keyDown);
-  if (_lobby3D.keyUp)   document.removeEventListener("keyup",   _lobby3D.keyUp);
-  if (_lobby3D.onResize) window.removeEventListener("resize", _lobby3D.onResize);
-
-  // Remove lobby avatar mixers from the global _glbMixers array so they don't
-  // keep running after the game starts (would cause walk anim glitches in-game)
-  if (typeof _glbMixers !== "undefined") {
-    var _lobbyMeshes = [];
-    var _collectMeshes = function(av) {
-      if (!av || !av.mesh) return;
-      av.mesh.traverse(function(c) { if (c.userData && c.userData.mixer) _lobbyMeshes.push(c.userData.mixer); });
-      if (av.mesh.userData && av.mesh.userData.mixer) _lobbyMeshes.push(av.mesh.userData.mixer);
-    };
-    _lobby3D.avatars.forEach(_collectMeshes);
-    if (_lobby3D.myAvatar) _collectMeshes({ mesh: _lobby3D.myAvatar });
-    if (_lobbyMeshes.length > 0) {
-      _glbMixers = _glbMixers.filter(function(m){ return _lobbyMeshes.indexOf(m) < 0; });
-    }
-  }
-
-  if (_lobby3D.renderer) {
-    _lobby3D.renderer.dispose();
-    if (_lobby3D.renderer.domElement && _lobby3D.renderer.domElement.parentNode)
-      _lobby3D.renderer.domElement.parentNode.removeChild(_lobby3D.renderer.domElement);
-  }
-  _lobby3D.avatars.forEach(function(av){ if(av&&av.nameLabel) av.nameLabel.remove(); });
+  var L = _lobby3D;
+  Object.keys(L.avatars).forEach(function(k) { _lobbyDropAvatar(+k); });
+  if (L.me) { _lobbyStopMixers(L.me); L.group.remove(L.me); }
+  if (L.meLabel) L.meLabel.remove();
+  if (L.group.parent) L.group.parent.remove(L.group);
+  if (typeof GFX !== "undefined") GFX.disposeTree(L.group);
   _lobby3D = null;
 }
 
@@ -1039,6 +964,7 @@ function hostStartGame() {
   mpMode          = true;
   matchSeed       = Math.floor(Math.random() * 1000000000);
   HOLES           = [];
+  BT.newMatch();
   // Don't pre-generate — loadHole(0) uses seed (matchSeed + 0*7331)
   // Clients generate identically via their own loadHole(0) with same matchSeed
 
@@ -1048,7 +974,7 @@ function hostStartGame() {
     var _fullSkins = Object.assign({}, window._remoteSkins || {});
     _fullSkins[0] = (typeof equippedPlayerSkin !== "undefined") ? equippedPlayerSkin : "default";
     sendTo(pIdx, { t: "start", myIdx: pIdx, playerCount, names: playerNames, matchSeed, hostNow: Date.now(),
-    holes: [], activeThemes: ACTIVE_THEMES, holeCount: HOLE_COUNT, difficulty: DIFFICULTY,
+    holes: [], activeThemes: ACTIVE_THEMES, holeCount: HOLE_COUNT, difficulty: DIFFICULTY, mode: BT.mode, items: BT.items,
     hostSkins: equippedSkins,
     remoteSkins: _fullSkins, remoteCos: Object.assign({}, window._remoteCos || {}, { 0: COS.equipped() }) });
   });

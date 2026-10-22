@@ -156,7 +156,7 @@ GFX.THEMES = {
                 water:{kind:"water",deep:0xa06a08,shallow:0xffc840}, surf:{style:"sand",top:0xf0d890,edge:0xc0a060,rock1:0xd8b070,rock2:0xb89050}, grass:[0.3,0x8a8a2a,0xd8d070] },
   sixtyseven: { zen:0x000800, hor:0x003a10, gnd:0x000400, sun:[0x44ff88,0.65,35,40], hemi:[0x22aa44,0x001000,0.6], fog:[0x002a0a,0.010], exp:1.1, bloom:1.0, stars:0.3, clouds:0,
                 water:{kind:"grid",deep:0x000800,shallow:0x002a0a,line:0x00ff66}, surf:{style:"neon",top:0x001a08,edge:0x00120a,rock1:0x00100a,rock2:0x001a10,line:0x00ff44}, grass:[0] },
-  winter:     { zen:0x6a9ed8, hor:0xe6f0fa, gnd:0xa0b0c0, sun:[0xfff6ea,2.4,24,150], hemi:[0xd8e8ff,0x9ab0c8,0.7], fog:[0xe0eaf5,0.006], exp:0.82, bloom:0.3, stars:0, clouds:0.5, cloudCol:0xffffff,
+  winter:     { zen:0x2a6ab8, hor:0xa8c4e0, gnd:0x6a7a8a, sun:[0xfff0dc,1.9,22,150], hemi:[0xb8d0f0,0x5a7088,0.4], fog:[0xb0c4da,0.0028], exp:0.66, env:0.35, bloom:0.12, stars:0, clouds:0.5, cloudCol:0xffffff,
                 water:{kind:"water",deep:0x1a3a5a,shallow:0x6a9ac0}, surf:{style:"snow",top:0xf4f8ff,edge:0xdde6f0,rock1:0x5a6a7a,rock2:0x7a8a9a}, grass:[0] },
   moon:       { zen:0x000000, hor:0x05050a, gnd:0x050505, sun:[0xffffff,3.0,28,60], hemi:[0x30304a,0x101010,0.3], fog:[0x000000,0.0015], exp:1.0, bloom:0.5, stars:1.0, clouds:0,
                 water:{kind:"none"}, surf:{style:"regolith",top:0x8a8a8c,edge:0x6a6a6e,rock1:0x5a5a5e,rock2:0x6a6a70}, grass:[0] },
@@ -174,7 +174,7 @@ GFX.THEMES = {
                 water:{kind:"water",deep:0x0a1a1a,shallow:0x2a4040}, surf:{style:"grass",top:0x4a6a3a,edge:0x4a3a28,rock1:0x4a4a44,rock2:0x3a3a34}, grass:[1.0,0x2a4a1a,0x6a8a3a] },
   waterfall:  { zen:0x4a9ad8, hor:0xd0f0f0, gnd:0x5a7a7a, sun:[0xfff8e8,2.5,45,110], hemi:[0xd0f0f0,0x3a6a3a,0.7], fog:[0xc8e8ea,0.005], exp:0.92, bloom:0.3, stars:0, clouds:0.4, cloudCol:0xffffff,
                 water:{kind:"water",deep:0x0a4a6a,shallow:0x2aa0c0}, surf:{style:"grass",top:0x3a8a3a,edge:0x4a3a2a,rock1:0x4a5a4a,rock2:0x5a6a5a}, grass:[1.15,0x1a5a1a,0x6ac04a], flowers:[0xffffff,0xff7aa0,0xffe060] },
-  poolrooms:  { zen:0xd8f8ff, hor:0xf0ffff, gnd:0xa0d0d0, sun:[0xffffff,1.5,75,40], hemi:[0xffffff,0x9ad0d0,1.0], fog:[0xd8f4f4,0.010], exp:0.85, bloom:0.5, stars:0, clouds:0,
+  poolrooms:  { zen:0xb8e4ee, hor:0xd8f0f2, gnd:0x8ab8b8, sun:[0xfff8f0,1.0,75,40], hemi:[0xeaf6f6,0x7aa8a8,0.55], fog:[0xc0dede,0.012], exp:0.72, env:0.35, bloom:0.15, stars:0, clouds:0,
                 water:{kind:"water",deep:0x1a8aa8,shallow:0x8ae8f0}, surf:{style:"tile",top:0xf0f0e8,edge:0xd8e0e0,rock1:0xe0e8e8,rock2:0xc8d8d8}, grass:[0] },
   hogwarts:   { zen:0x050418, hor:0x2a2050, gnd:0x08060f, sun:[0xb8b0ff,1.3,32,200], hemi:[0x7a6aba,0x2a2018,0.85], fog:[0x1e1838,0.008], exp:1.3, bloom:0.85, stars:1.0, clouds:0.3, cloudCol:0x15122a,
                 water:{kind:"water",deep:0x03020a,shallow:0x15122a}, surf:{style:"stone",top:0x5a5248,edge:0x3a342e,rock1:0x3a342e,rock2:0x4a4238}, grass:[0.4,0x1a2a18,0x3a5a2a] },
@@ -230,6 +230,8 @@ GFX._applyPixelRatio = function() {
   if (!GFX.renderer) return;
   var pr = Math.min(window.devicePixelRatio || 1, GFX.settings.pixelRatio) * GFX._dynScale;
   pr = Math.max(0.6, pr);
+  if (GFX.composer && GFX._lastPR && (GFX._lastPR < 1.6) !== (pr < 1.6)) { GFX._lastPR = pr; GFX.renderer.setPixelRatio(pr); GFX._setupPost(); }   // MSAA on/off follows the DPR
+  GFX._lastPR = pr;
   GFX.renderer.setPixelRatio(pr);
   GFX.renderer.setSize(window.innerWidth, window.innerHeight);
   if (GFX.composer) {
@@ -436,6 +438,7 @@ GFX._applyAtmosphere = function() {
     var fogCol = new THREE.Color(P.fog[0]).lerp(hor, 0.8);
     if (W.fogToSky) fogCol.lerp(skyW, 0.6);
     if (W.fogToSky) { u.horizon.value.copy(fogCol); u.ground.value.copy(fogCol); }
+    else u.ground.value.copy(fogCol);   // below the horizon the sky is the haze the distant land melts into
     GFX._fogLinear = fogCol.clone();
     GFX._updateFogColor();
     GFX.scene.fog.density = (W.fogAbs ? Math.max(W.fogAbs, P.fog[1]) : P.fog[1] * W.fogMul) * (GFX.fogBoost || 1);
@@ -481,7 +484,11 @@ GFX._regenEnv = function() {
   GFX.skyUniforms.sunSize.value = 0.004;
   var tm = GFX.renderer.toneMapping;
   GFX.renderer.toneMapping = THREE.NoToneMapping;
+  // Bright skies (snow, white tiles) would flood everything with sky light: themes can dim it (P.env)
+  var envMul = (GFX.themePreset(GFX.theme) || {}).env || 1, U = GFX.skyUniforms, saved = null;
+  if (envMul !== 1) { saved = [U.zenith.value.clone(), U.horizon.value.clone(), U.ground.value.clone()]; U.zenith.value.multiplyScalar(envMul); U.horizon.value.multiplyScalar(envMul); U.ground.value.multiplyScalar(envMul); }
   GFX.envRT = GFX.pmrem.fromScene(GFX.envScene, 0.02, 0.1, 1200);
+  if (saved) { U.zenith.value.copy(saved[0]); U.horizon.value.copy(saved[1]); U.ground.value.copy(saved[2]); }
   GFX.renderer.toneMapping = tm;
   GFX.skyUniforms.sunSize.value = prevSize;
   GFX.scene.environment = GFX.envRT.texture;
@@ -1398,8 +1405,10 @@ GFX._setupPost = function() {
     var pr = r.getPixelRatio();
     var w = Math.floor(window.innerWidth * pr), h = Math.floor(window.innerHeight * pr);
     var rtOpts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: THREE.HalfFloatType };
-    var rt = THREE.WebGLMultisampleRenderTarget ? new THREE.WebGLMultisampleRenderTarget(w, h, rtOpts) : new THREE.WebGLRenderTarget(w, h, rtOpts);
-    if (rt.samples !== undefined) rt.samples = 4;
+    // MSAA only where it shows: on high-DPI screens the extra pixels already smooth edges, and 4× MSAA at 2× DPR is a GPU hog
+    var msaa = pr < 1.6 && THREE.WebGLMultisampleRenderTarget;
+    var rt = msaa ? new THREE.WebGLMultisampleRenderTarget(w, h, rtOpts) : new THREE.WebGLRenderTarget(w, h, rtOpts);
+    if (msaa && rt.samples !== undefined) rt.samples = 4;
     var comp = new THREE.EffectComposer(r, rt);
     comp.addPass(new THREE.RenderPass(GFX.scene, GFX.camera));
     var P = GFX.themePreset(GFX.theme);
@@ -1474,7 +1483,11 @@ GFX._thunder = function() {
   src.connect(lp).connect(g).connect(AudioEngine.G ? AudioEngine.G.sfx : ctx.destination); src.start(now);
 };
 
-// Dynamic resolution: if the frame rate stays low, render at a lower resolution
+// Adaptive quality ("auto"): keep the game near 60 fps on any laptop.
+// Measured on a Retina MacBook: render resolution is by far the biggest GPU cost (DPR 2 ≈ 3× DPR 1);
+// shadows are nearly free, and dropping the post chain is *slower* (the canvas falls back to native MSAA).
+// So: scale resolution first (down to half), then shrink the shadow map. Climb back when there's headroom.
+GFX._tier = 0;
 GFX._autoTune = function(dt) {
   if (GFX.qualityPref !== "auto" && GFX.qualityPref) return;
   GFX._fpsAcc += dt; GFX._fpsFrames++;
@@ -1483,8 +1496,25 @@ GFX._autoTune = function(dt) {
   window._fpsAvg = Math.round(fps);
   GFX._fpsAcc = 0; GFX._fpsFrames = 0;
   if (document.hidden) return;
-  if (fps < 38 && GFX._dynScale > 0.6) { GFX._dynScale = Math.max(0.6, GFX._dynScale - 0.15); GFX._applyPixelRatio(); }
-  else if (fps > 57 && GFX._dynScale < 1) { GFX._dynScale = Math.min(1, GFX._dynScale + 0.05); GFX._applyPixelRatio(); }
+  if (fps < 45) {
+    GFX._good = 0;
+    if (GFX._dynScale > 0.5) { GFX._dynScale = Math.max(0.5, GFX._dynScale - (fps < 30 ? 0.2 : 0.1)); GFX._applyPixelRatio(); }
+    else if (GFX._tier < 1) GFX._setTier(1);
+  } else if (fps > 57) {
+    if (++GFX._good < 3) return;   // only climb after ~6 s of headroom
+    GFX._good = 0;
+    if (GFX._tier > 0) GFX._setTier(0);
+    else if (GFX._dynScale < 1) { GFX._dynScale = Math.min(1, GFX._dynScale + 0.05); GFX._applyPixelRatio(); }
+  } else GFX._good = 0;
+};
+GFX._setTier = function(t) {
+  GFX._tier = t;
+  var want = t >= 1 ? Math.max(512, GFX.settings.shadowMap / 2) : GFX.settings.shadowMap;
+  if (GFX.sun && GFX.sun.shadow.mapSize.x !== want) {
+    GFX.sun.shadow.mapSize.set(want, want);
+    if (GFX.sun.shadow.map) { GFX.sun.shadow.map.dispose(); GFX.sun.shadow.map = null; }
+  }
+  console.log("DiskGolfi: adaptive quality tier " + t + " (scale " + GFX._dynScale.toFixed(2) + ")");
 };
 
 GFX.render = function() {

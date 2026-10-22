@@ -9,21 +9,9 @@
 // Console logs "Suggested MODEL_OFFSETS.feetLift" for each player model on first load.
 // Add skin_* entries if your skin models need different lift values.
 var MODEL_OFFSETS = {
-  "player_default": { feetLift: 0.15 },
-  "player_0":       { feetLift: 0.15 },
-  "player_1":       { feetLift: 0.15 },
-  "player_2":       { feetLift: 0.15 },
-  "player_3":       { feetLift: 0.15 },
-  "player_4":       { feetLift: 0.15 },
-  // Skin model offsets — add entries if feet float or sink:
-  "skin_default":   { feetLift: 0.15 },
-  "skin_trainer":   { feetLift: 0.15 },
-  "skin_robot":     { feetLift: 0.15 },
-  "skin_crypto":    { feetLift: 0.15 },
-  "skin_furry":     { feetLift: 0.15 },
+  // The characters stand on their own origin (auto-placed on load); add an entry if one floats or sinks.
+  "player_default": { feetLift: 0 },
   "skin_ghost":     { feetLift: 0.15 },
-  "skin_ninja":     { feetLift: 0.15 },
-  "skin_citizen3":  { feetLift: 0.15 },
   "skin_runner":    { feetLift: 0.0 },
 };
 function _playerFeetLift(slotIdx, skinKey) {
@@ -31,8 +19,8 @@ function _playerFeetLift(slotIdx, skinKey) {
   if (skinKey && MODEL_OFFSETS[skinKey] && MODEL_OFFSETS[skinKey].feetLift != null)
     return MODEL_OFFSETS[skinKey].feetLift;
   var key = "player_" + slotIdx;
-  return (MODEL_OFFSETS[key] && MODEL_OFFSETS[key].feetLift != null ? MODEL_OFFSETS[key].feetLift : null) ||
-         (MODEL_OFFSETS["player_default"] && MODEL_OFFSETS["player_default"].feetLift) || 0;
+  if (MODEL_OFFSETS[key] && MODEL_OFFSETS[key].feetLift != null) return MODEL_OFFSETS[key].feetLift;
+  return (MODEL_OFFSETS["player_default"] && MODEL_OFFSETS["player_default"].feetLift) || 0;
 }
 
 // ── MULTIPLAYER NETWORKING ───────────────────────────────────────────────
@@ -145,12 +133,12 @@ var MODEL_OVERRIDES = {
 
   // ── PLAYER MODELS ─────────────────────────────────────────────────────────
   // Every slot uses the animated BasePlayer rig; cosmetic variety comes from skins.
-player_default: 'models/BasePlayer.glb',
-player_0:       'models/BasePlayer.glb',
-player_1:       'models/BasePlayer.glb',
-player_2:       'models/BasePlayer.glb',
-player_3:       'models/BasePlayer.glb',
-player_4:       'models/BasePlayer.glb',
+player_default: 'models/players/Adventurer.glb',
+player_0: 'models/players/Adventurer.glb',
+player_1: 'models/players/Adventurer.glb',
+player_2: 'models/players/Adventurer.glb',
+player_3: 'models/players/Adventurer.glb',
+player_4: 'models/players/Adventurer.glb',
 
 // ── PLAYER SKIN MODEL OVERRIDES ─────────────────────────────────────────
 // These are cosmetic character skins the local player can equip in the Skin Locker.
@@ -158,15 +146,24 @@ player_4:       'models/BasePlayer.glb',
 // like BasePlayer.glb: T-pose at rest, Idle/Walk/Sprint/Jump/Grounded clips.
 // Uncomment and provide your model path to activate a skin.
 //
-skin_default:        'models/BasePlayer.glb',
-skin_citizen3:       'models/players/Citizen 3.glb',
 skin_runner:         'models/Animated Woman.glb',
-skin_trainer:        'models/players/Citizen 2.glb',
-skin_robot:          'models/players/Santa Claus.glb',
-skin_crypto:         'models/players/Crypto Bro.glb',
-skin_furry:          'models/players/Chicken Guy.glb',
+// Quaternius character pack (CC0) + madtrollstudio Character Base (CC-BY 3.0) — see CREDITS.md
+skin_adventurer:     'models/players/Adventurer.glb',
+skin_man:            'models/players/Man.glb',
+skin_casual:         'models/players/Woman Casual.glb',
+skin_dress:          'models/players/Woman Dress.glb',
+skin_business:       'models/players/Business Man.glb',
+skin_hoodie:         'models/players/Hoodie Character.glb',
+skin_punk:           'models/players/Punk.glb',
+skin_worker:         'models/players/Worker.glb',
+skin_swat:           'models/players/SWAT.glb',
+skin_astronaut:      'models/players/Astronaut.glb',
+skin_farmer:         'models/players/Farmer.glb',
+skin_beach:          'models/players/Beach Character.glb',
+skin_king:           'models/players/King.glb',
+skin_suit:           'models/players/Suit.glb',
+skin_mannequin:      'models/players/Character Base.glb',
 skin_ghost:          'models/players/Rubber Duck.glb',
-skin_ninja:          'models/players/Food Worker.glb',
 
   // ── BASKET (appears on every hole) ────────────────────────────────────
   // basket:            'models/basket.glb',
@@ -319,12 +316,6 @@ tornado:        'models/Tornado.glb',
 // GRAND CANYON
 canyon:         'models/Mountain.glb',
 
-// POOLROOMS
-poolroom_sign:  'models/Arrow Sign.glb',
-
-// HOGWARTS
-hw_stone:       'models/Rock.glb',
-
 // SKYBLOCK
 sb_crate:       'models/Blocks.glb',
 
@@ -337,6 +328,9 @@ chick:          'models/Chick.glb',
 robot:          'models/Robot.glb',
 duck:           'models/players/Rubber Duck.glb',
 cube:           'models/Portal_ Companion Cube.glb',
+
+// VEHICLES
+celica:         'models/Celica.glb',
 
 // ISLANDS — generated procedurally in graphics.js (textured tops, rocky cliffs,
 // wind-swayed grass), so Island.glb / Island2.glb are no longer used.
@@ -407,7 +401,8 @@ function loadModel(key, callback) {
       // Resolve target size from MODEL_CONFIG — single source of truth
       var _cfg = null;
       var _baseKey = key.replace(/^(player_|skin_|disc_).*/, function(m,p1){ return p1.slice(0,-1); });
-      if (key.startsWith("player_") || key === "player_default" || key.startsWith("skin_")) _cfg = MODEL_CONFIG.player;
+      if (MODEL_CONFIG[key]) _cfg = MODEL_CONFIG[key];   // per-model override (e.g. slimmer, realistic characters)
+      else if (key.startsWith("player_") || key === "player_default" || key.startsWith("skin_")) _cfg = MODEL_CONFIG.player;
       else if (key.startsWith("disc")) _cfg = { targetHeight: MODEL_CONFIG.disc.targetDiameter };
       else if (MODEL_CONFIG[key]) _cfg = MODEL_CONFIG[key];
       else if (key === "pinetree" || key === "xmastree") _cfg = MODEL_CONFIG.tree;
@@ -419,6 +414,12 @@ function loadModel(key, callback) {
         group.scale.setScalar(_scale);
         var _bbox2 = new THREE.Box3().setFromObject(group);
         group.position.y -= _bbox2.min.y;
+        // characters must stand on their own origin (some exports are offset to the side)
+        if (key.startsWith("skin_") || key.startsWith("player_")) {
+          var _cx = (_bbox2.min.x + _bbox2.max.x) / 2, _cz = (_bbox2.min.z + _bbox2.max.z) / 2;
+          if (Math.abs(_cx) > 0.05) group.position.x -= _cx;
+          if (Math.abs(_cz) > 0.05) group.position.z -= _cz;
+        }
         console.log("DiskGolfi: auto-scaled '" + key + "' to " + _target + "m (was " + _tallest.toFixed(2) + "m)");
       }
 
@@ -426,6 +427,7 @@ function loadModel(key, callback) {
       // Each clone gets its own mixer in _cloneGLB so bones are correct.
       if (gltf.animations && gltf.animations.length > 0) {
         group.userData.animations = gltf.animations;  // raw clips only
+        _synthPoseClips(group);                       // add Jump / Sit to rigs that ship without them
       }
       if (typeof GFX !== "undefined" && GFX.fixGLBMaterials) GFX.fixGLBMaterials(group);
       _modelCache[key] = group;
@@ -458,6 +460,107 @@ function loadModel(key, callback) {
       pending.forEach(function(cb2) { cb2(null); });
     });
   });
+}
+
+// ── Generated pose clips ─────────────────────────────────────────────────────
+// The poly.pizza characters (Quaternius "CharacterArmature" rig) have no Jump or
+// Sit clip. Build them from the rig itself: start from the Idle pose, rotate limbs
+// in model space (so odd bone axes don't matter) and bake the result as keyframes.
+// Their feet are IK bones parented to the root, so they are carried along with the shins.
+function _synthPoseClips(root) {
+  var clips = root.userData.animations || [];
+  var wantJump = !clips.some(function(c) { return /jump/i.test(c.name); });
+  var wantSit = !clips.some(function(c) { return /sit_?idle/i.test(c.name); });   // "Man_Sitting" is a sit-down sequence, not a held pose
+  if (!wantJump && !wantSit) return;
+  var S = THREE.PropertyBinding.sanitizeNodeName, B = {}, bones = [];
+  root.traverse(function(o) { if (o.isBone) { B[o.name] = o; bones.push(o); } });
+  var bn = function(n) { return B[S(n)]; };
+  if (!["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "UpperArm.L", "UpperArm.R"].every(bn)) return;
+  var idle = clips.find(function(c) { return /\|idle$/i.test(c.name); }) || clips.find(function(c) { return /idle/i.test(c.name); });
+  if (!idle) return;
+  var orig = bones.map(function(b) { return [b.quaternion.clone(), b.position.clone()]; });
+  var mixer = new THREE.AnimationMixer(root); mixer.clipAction(idle).play(); mixer.update(0);
+  root.updateMatrixWorld(true);
+  var idleL = bones.map(function(b) { return [b.quaternion.clone(), b.position.clone()]; });
+  var V = function() { return new THREE.Vector3(); }, Q = function() { return new THREE.Quaternion(); };
+  var idleWQ = {}, idleWP = {};
+  bones.forEach(function(b) { idleWQ[b.name] = b.getWorldQuaternion(Q()); idleWP[b.name] = b.getWorldPosition(V()); });
+  var rq = root.getWorldQuaternion(Q()), rqi = rq.clone().invert();
+  var inRoot = function(v) { return v.clone().sub(root.getWorldPosition(V())).applyQuaternion(rqi); };
+  // which way is forward (toe vs ankle) and which side is .L
+  var fA = bn("Foot.L"), fT = bn("Foot.L_end");
+  var f = fA && fT ? (Math.sign(inRoot(idleWP[fT.name]).z - inRoot(idleWP[fA.name]).z) || 1) : 1;
+  var sL = Math.sign(inRoot(idleWP[bn("UpperArm.L").name]).x) || 1;
+  var X = new THREE.Vector3(1, 0, 0), Z = new THREE.Vector3(0, 0, 1);
+
+  function pose(spec, bodyDrop) {
+    bones.forEach(function(b, i) { b.quaternion.copy(idleL[i][0]); b.position.copy(idleL[i][1]); });
+    root.updateMatrixWorld(true);
+    var body = bn("Body") || bn("Hips");
+    if (bodyDrop && body) { var p = idleWP[body.name].clone(); p.y -= bodyDrop; body.position.copy(body.parent.worldToLocal(p)); body.updateMatrixWorld(true); }
+    var deltaW = {};
+    bones.forEach(function(b) {
+      var d = spec[b.name]; if (!d) return;
+      var dq = Q(); d.forEach(function(r) { dq.premultiply(Q().setFromAxisAngle(r[0], r[1])); });
+      var dw = rq.clone().multiply(dq).multiply(rqi); deltaW[b.name] = dw;
+      var target = dw.clone().multiply(idleWQ[b.name]);
+      b.quaternion.copy(b.parent.getWorldQuaternion(Q()).invert().multiply(target));
+      b.updateMatrixWorld(true);
+    });
+    // IK feet follow their shins
+    ["L", "R"].forEach(function(s) {
+      var foot = bn("Foot." + s), shin = bn("LowerLeg." + s), end = bn("LowerLeg." + s + "_end") || shin;
+      if (!foot || foot.parent === end || foot.parent === shin) return;
+      var dw = shin.getWorldQuaternion(Q()).multiply(idleWQ[shin.name].clone().invert());
+      var wp = end.getWorldPosition(V()).add(idleWP[foot.name].clone().sub(idleWP[end.name]).applyQuaternion(dw));
+      foot.position.copy(foot.parent.worldToLocal(wp));
+      foot.quaternion.copy(foot.parent.getWorldQuaternion(Q()).invert().multiply(dw.multiply(idleWQ[foot.name])));
+      foot.updateMatrixWorld(true);
+    });
+    return bones.map(function(b) { return [b.quaternion.clone(), b.position.clone()]; });
+  }
+  function bake(name, frames) {   // frames: [{t, s}] with s a pose snapshot
+    var tracks = [];
+    bones.forEach(function(b, i) {
+      var moved = frames.some(function(fr) { return fr.s[i][0].angleTo(idleL[i][0]) > 1e-4 || fr.s[i][1].distanceToSquared(idleL[i][1]) > 1e-8; });
+      var times = frames.map(function(fr) { return fr.t; });
+      var qv = [], pv = [];
+      frames.forEach(function(fr) { fr.s[i][0].toArray(qv, qv.length); fr.s[i][1].toArray(pv, pv.length); });
+      tracks.push(new THREE.QuaternionKeyframeTrack(b.name + ".quaternion", times, qv));
+      if (moved) tracks.push(new THREE.VectorKeyframeTrack(b.name + ".position", times, pv));
+    });
+    clips.push(new THREE.AnimationClip(name, -1, tracks));
+  }
+  var blend = function(a, b, k) { return a.map(function(e, i) { return [e[0].clone().slerp(b[i][0], k), e[1].clone().lerp(b[i][1], k)]; }); };
+  var L = function(n) { return S(n); }, spec;
+  if (wantJump) {
+    spec = {};
+    spec[L("UpperLeg.L")] = [[X, -1.25 * f]]; spec[L("LowerLeg.L")] = [[X, 0.55 * f]];
+    spec[L("UpperLeg.R")] = [[X, -0.45 * f]]; spec[L("LowerLeg.R")] = [[X, 0.85 * f]];
+    spec[L("UpperArm.L")] = [[Z, 2.25 * sL], [X, -0.35 * f]]; spec[L("UpperArm.R")] = [[Z, -2.25 * sL], [X, -0.35 * f]];
+    if (bn("Torso")) spec[L("Torso")] = [[X, 0.12 * f]];
+    var jp = pose(spec), id0 = idleL;
+    bake("Generated|Jump", [{ t: 0, s: blend(id0, jp, 0.45) }, { t: 0.16, s: jp }, { t: 0.9, s: jp }]);
+  }
+  if (wantSit) {
+    // hips come down to knee height so thighs lie flat and shins hang to the floor
+    var thigh = bn("UpperLeg.L"), shinB = bn("LowerLeg.L"), shinE = bn("LowerLeg.L_end") || shinB;
+    var hipY = idleWP[thigh.name].y;
+    var shinLen = idleWP[shinB.name].distanceTo(idleWP[shinE.name]), ankleY = idleWP[shinE.name].y - root.getWorldPosition(V()).y;
+    var drop = Math.max(0, hipY - root.getWorldPosition(V()).y - (ankleY + shinLen));
+    spec = {};
+    [["L", 1], ["R", -1]].forEach(function(e) {
+      spec[L("UpperLeg." + e[0])] = [[X, -1.5 * f], [new THREE.Vector3(0, 1, 0), 0.08 * e[1] * sL]];
+      spec[L("LowerLeg." + e[0])] = [[X, -0.12 * f]];
+      spec[L("UpperArm." + e[0])] = [[X, -1.0 * f], [Z, -0.22 * e[1] * sL]];
+      if (bn("LowerArm." + e[0])) spec[L("LowerArm." + e[0])] = [[X, -1.45 * f], [Z, -0.3 * e[1] * sL]];
+    });
+    var sp = pose(spec, drop);
+    bake("Generated|SitIdle", [{ t: 0, s: sp }, { t: 1, s: sp }]);
+  }
+  mixer.stopAllAction(); mixer.uncacheRoot(root);
+  bones.forEach(function(b, i) { b.quaternion.copy(orig[i][0]); b.position.copy(orig[i][1]); });
+  root.updateMatrixWorld(true);
 }
 
 // Deep-clone a loaded GLB group (each instance needs its own transform)
@@ -697,7 +800,7 @@ var THEMES = [
 // ALL GLBs are auto-normalized to these values in loadModel().
 // DO NOT add manual scale corrections elsewhere in code.
 var MODEL_CONFIG = {
-  player:       { targetHeight: 1.75 },   // standing player height in world units
+  player:       { targetHeight: 2.0 },   // standing player height in world units
   disc:         { targetDiameter: 1.08 }, // frisbee diameter (matches procedural disc)
   basket:       { targetHeight: 1.5  },   // basket height
   tree:         { targetHeight: 6.0  },
@@ -723,11 +826,28 @@ var MODEL_CONFIG = {
   poolroom_sign:  { targetHeight: 2.4  },
   shiba_inu:      { targetHeight: 3.5  },  // 2.5× game scale so dog is clearly visible
   animated_woman: { targetHeight: 5.16 },  // 3× scale
+  celica:         { targetHeight: 7.16 },
+  // realistic-proportion characters read small next to the chunky ones at the same height
+  skin_adventurer: { targetHeight: 2.0 },
+  skin_man: { targetHeight: 2.0 },
+  skin_casual: { targetHeight: 2.0 },
+  skin_dress: { targetHeight: 2.0 },
+  skin_business: { targetHeight: 2.0 },
+  skin_hoodie: { targetHeight: 2.0 },
+  skin_punk: { targetHeight: 2.0 },
+  skin_worker: { targetHeight: 2.0 },
+  skin_swat: { targetHeight: 2.0 },
+  skin_astronaut: { targetHeight: 2.0 },
+  skin_farmer: { targetHeight: 2.0 },
+  skin_beach: { targetHeight: 2.0 },
+  skin_king: { targetHeight: 2.0 },
+  skin_suit: { targetHeight: 2.0 },
+  skin_mannequin: { targetHeight: 2.0 },  // longest side: a 4.62 m coupe at 1.55× (sized for the game's chunky characters)
 };
 
-var MAX_PLAYERS = 5;
-var PLAYER_COLORS = [0x00ffff, 0xff00ff, 0xffff00, 0xff6600, 0x00ff88];
-var PLAYER_DISC_TYPES = ["driver", "midrange", "putter", "driver", "midrange"];
+var MAX_PLAYERS = 8;
+var PLAYER_COLORS = [0x00ffff, 0xff00ff, 0xffff00, 0xff6600, 0x00ff88, 0x8a6aff, 0xff4a6a, 0x6affd8];
+var PLAYER_DISC_TYPES = ["driver", "midrange", "putter", "driver", "midrange", "putter", "driver", "midrange"];
 
 // ── PLAYER SKINS ─────────────────────────────────────────────────────────────
 // Character skins selectable in the Skin Locker. modelKey links to MODEL_OVERRIDES.
@@ -740,23 +860,33 @@ var PLAYER_DISC_TYPES = ["driver", "midrange", "putter", "driver", "midrange"];
 //   3. Reload — skin appears in the Skin Locker
 var PLAYER_SKINS = [
   // Every character is playable from the start. They all walk, run and jump.
-  { id: "default",  name: "Sam",          icon: "🧍", modelKey: "skin_default",  color: null,     unlock: "", free: true, blurb: "The all-rounder" },
-  { id: "citizen",  name: "Alex",         icon: "🧑", modelKey: "skin_trainer",  color: 0xff6600, unlock: "", free: true, blurb: "Weekend disc golfer" },
-  { id: "citizen3", name: "Maya",         icon: "👩", modelKey: "skin_citizen3", color: 0x66aaff, unlock: "", free: true, blurb: "League champion" },
   { id: "runner",   name: "Runner",       icon: "🏃", modelKey: "skin_runner",   color: 0x8affc0, unlock: "", free: true, blurb: "Always in a hurry" },
-  { id: "chef",     name: "Food Worker",  icon: "👨‍🍳", modelKey: "skin_ninja",    color: 0xffffff, unlock: "", free: true, blurb: "On a lunch break" },
-  { id: "crypto",   name: "Crypto Bro",   icon: "💎", modelKey: "skin_crypto",   color: 0xffdd00, unlock: "", free: true, blurb: "To the moon" },
-  { id: "chicken",  name: "Chicken Guy",  icon: "🐔", modelKey: "skin_furry",    color: 0xff8800, unlock: "", free: true, blurb: "Bawk" },
-  { id: "santa",    name: "Santa Claus",  icon: "🎅", modelKey: "skin_robot",    color: 0xcc0000, unlock: "", free: true, blurb: "Off season" },
   { id: "duck",     name: "Rubber Duck",  icon: "🦆", modelKey: "skin_ghost",    color: 0xffee00, unlock: "", free: true, blurb: "Hops everywhere", staticSkin: true },
+  { id: "adventurer", name: "Adventurer", icon: "🧭", modelKey: "skin_adventurer", color: null, unlock: "", free: true, blurb: "Off the beaten path" },
+  { id: "man", name: "Dave", icon: "🙂", modelKey: "skin_man", color: null, unlock: "", free: true, blurb: "Just here for the vibes" },
+  { id: "casual", name: "Jess", icon: "👩", modelKey: "skin_casual", color: null, unlock: "", free: true, blurb: "Brunch, then 18 holes" },
+  { id: "dress", name: "Rose", icon: "👗", modelKey: "skin_dress", color: null, unlock: "", free: true, blurb: "Dressed for the clubhouse" },
+  { id: "business", name: "Business Man", icon: "💼", modelKey: "skin_business", color: null, unlock: "", free: true, blurb: "Should be in a meeting" },
+  { id: "hoodie", name: "Hoodie", icon: "🧥", modelKey: "skin_hoodie", color: null, unlock: "", free: true, blurb: "Comfy and dangerous" },
+  { id: "punk", name: "Punk", icon: "🤘", modelKey: "skin_punk", color: null, unlock: "", free: true, blurb: "Throws hyzer, lives anhyzer" },
+  { id: "worker", name: "Worker", icon: "👷", modelKey: "skin_worker", color: null, unlock: "", free: true, blurb: "On a very long break" },
+  { id: "swat", name: "SWAT", icon: "🛡️", modelKey: "skin_swat", color: null, unlock: "", free: true, blurb: "Tactical putting" },
+  { id: "astronaut", name: "Astronaut", icon: "🧑‍🚀", modelKey: "skin_astronaut", color: null, unlock: "", free: true, blurb: "Low-gravity specialist" },
+  { id: "farmer", name: "Farmer", icon: "🌾", modelKey: "skin_farmer", color: null, unlock: "", free: true, blurb: "Fresh from the cabbage patch" },
+  { id: "beach", name: "Beach Bum", icon: "🩴", modelKey: "skin_beach", color: null, unlock: "", free: true, blurb: "Flip-flops are valid footwear" },
+  { id: "king", name: "The King", icon: "👑", modelKey: "skin_king", color: null, unlock: "", free: true, blurb: "Rules the fairway" },
+  { id: "suit", name: "Agent", icon: "🕴️", modelKey: "skin_suit", color: null, unlock: "", free: true, blurb: "Licensed to putt" },
+  { id: "mannequin", name: "Mannequin", icon: "🗿", modelKey: "skin_mannequin", color: null, unlock: "", free: true, blurb: "Hops everywhere", staticSkin: true },
 ];
 // Master backdoor: unlocks ALL skins at once
 var PLAYER_SKINS_MASTER_CODE = "TOYOTA";
 
 // Active player skin (persisted)
-var equippedPlayerSkin = "default";
+var equippedPlayerSkin = "adventurer";
 (function() {
   try { var s = localStorage.getItem("dg_player_skin"); if (s) equippedPlayerSkin = s; } catch(e) {}
+  // retired characters (the old blocky rig) → the default adventurer
+  if (!PLAYER_SKINS.some(function(p) { return p.id === equippedPlayerSkin; })) equippedPlayerSkin = "adventurer";
 })();
 function savePlayerSkin() {
   try { localStorage.setItem("dg_player_skin", equippedPlayerSkin); } catch(e) {}
@@ -999,7 +1129,11 @@ var unlockedSkins = { classic:true, red:true, blue:true, green:true, black:true,
   } catch(e) {}
 })();
 function saveUnlocked() {
-  try { localStorage.setItem("diskgolfi_unlocked", JSON.stringify(unlockedSkins)); } catch(e) {}
+  try {
+    var _st = JSON.parse(localStorage.getItem("diskgolfi_unlocked") || "{}");
+    Object.keys(_st).forEach(function(k) { if (_st[k]) unlockedSkins[k] = true; });   // keep what another tab unlocked
+    localStorage.setItem("diskgolfi_unlocked", JSON.stringify(unlockedSkins));
+  } catch(e) {}
 }
 
 // ── BACKDOOR CODE to unlock all disc + player skins ─────────────────
@@ -1007,14 +1141,22 @@ function saveUnlocked() {
 (function() {
   var _buf = "";
   var _code = "TOYOTA";
+  var _drip = "DRIPCHECK";
   window.addEventListener("keydown", function(e) {
     // Skip modifier-only keys and inputs so typing in a text field doesn't trigger
     var tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
     if (e.key.length !== 1) return;
     _buf += e.key.toUpperCase();
-    if (_buf.length > _code.length) _buf = _buf.slice(-_code.length);
-    if (_buf === _code) {
+    if (_buf.length > 12) _buf = _buf.slice(-12);
+    if (_buf.slice(-_drip.length) === _drip && typeof COS !== "undefined") {
+      COS.unlockAll(); _buf = "";
+      var dm = document.createElement("div"); dm.textContent = "💧 Drip check passed — every cosmetic unlocked!"; dm.className = "toast";
+      document.body.appendChild(dm); setTimeout(function(){ dm.remove(); }, 3200);
+      return;
+    }
+    if (_buf.slice(-_code.length) === _code) {
+      if (typeof COS !== "undefined") COS.unlockAll();
       // Unlock all disc skins
       if (typeof DISC_SKINS !== "undefined") {
         (DISC_SKINS._global||[]).forEach(function(s){ unlockedSkins[s.id]=true; });
