@@ -29,7 +29,7 @@ VEH.spawnFor = function(h) {
   // a flat, dry spot beside the fairway near the tee, nose pointing down the hole
   var R = C.route, a = LV.pointAt(R, 0.0), fw = { x: a.dx, z: a.dz }, best = null;
   for (var k = 0; k < 40 && !best; k++) {
-    var t = 0.04 + (k % 8) * 0.03, side = k % 2 ? 1 : -1, off = 7 + Math.floor(k / 8) * 2.5;
+    var t = 0.0 + (k % 8) * 0.012, side = k % 2 ? 1 : -1, off = 11 + Math.floor(k / 8) * 2.5;   // parked beside the tee, out of the aiming view
     var p = LV.pointAt(R, t), x = p.x - p.dz * off * side, z = p.z + p.dx * off * side;
     var yaw = Math.atan2(p.dx, p.dz), ok = true, g0 = C.heightAt(x, z);
     if (g0 < C.hazardAt(x, z).level + 0.4 || !C.inBounds(x, z)) continue;

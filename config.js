@@ -428,6 +428,7 @@ function loadModel(key, callback) {
       if (gltf.animations && gltf.animations.length > 0) {
         group.userData.animations = gltf.animations;  // raw clips only
         _synthPoseClips(group);                       // add Jump / Sit to rigs that ship without them
+        _measureStrides(group);                       // natural ground speed of each walk / run clip (stops foot sliding)
       }
       if (typeof GFX !== "undefined" && GFX.fixGLBMaterials) GFX.fixGLBMaterials(group);
       _modelCache[key] = group;
@@ -563,6 +564,41 @@ function _synthPoseClips(root) {
   root.updateMatrixWorld(true);
 }
 
+// How fast does each locomotion clip move over the ground? Track the feet through one
+// cycle: in a stride the planted foot travels backwards by the step length during half
+// the cycle, so speed ≈ 2 × foot travel / duration. Used to time-scale clips to the
+// character's real speed (no more moon-walking).
+function _measureStrides(root) {
+  var clips = root.userData.animations || [], out = {};
+  var feet = []; root.traverse(function(o) { if (o.isBone && /(foot|toe)/i.test(o.name) && !/end|pole|^pt/i.test(o.name)) feet.push(o); });
+  if (!feet.length) { root.userData.clipSpeed = out; root.userData.strideScale = root.scale.x; return; }
+  var mixer = new THREE.AnimationMixer(root), orig = [];
+  root.traverse(function(o) { if (o.isBone) orig.push([o, o.quaternion.clone(), o.position.clone()]); });
+  clips.forEach(function(clip) {
+    if (!/walk|run|sprint|jog|gallop/i.test(clip.name) || /left|right|back|jump|shoot/i.test(clip.name)) return;
+    mixer.stopAllAction(); var act = mixer.clipAction(clip); act.reset().play();
+    // Track every foot through the cycle; while a foot is planted (near its lowest point)
+    // it slides backwards at exactly the speed the body should travel over the ground.
+    var N = 48, vs = [];
+    var tr = feet.map(function() { return []; }), v = new THREE.Vector3();
+    for (var i = 0; i <= N; i++) {
+      mixer.setTime(clip.duration * i / N); root.updateMatrixWorld(true);
+      feet.forEach(function(f, k) { f.getWorldPosition(v); var l = root.worldToLocal(v.clone()); tr[k].push([l.y * root.scale.y, l.z * root.scale.z]); });
+    }
+    tr.forEach(function(path) {
+      var lo = Math.min.apply(null, path.map(function(q) { return q[0]; })), hi = Math.max.apply(null, path.map(function(q) { return q[0]; }));
+      var band = lo + Math.max(0.02, (hi - lo) * 0.12), dtS = clip.duration / N;
+      for (var i2 = 1; i2 < path.length; i2++) if (path[i2][0] < band && path[i2 - 1][0] < band) vs.push(-(path[i2][1] - path[i2 - 1][1]) / dtS);
+    });
+    vs = vs.filter(function(x) { return x > 0; }).sort(function(a, b) { return a - b; });
+    if (vs.length >= 3 && clip.duration > 0) out[clip.name] = vs[vs.length >> 1];
+  });
+  mixer.stopAllAction(); mixer.uncacheRoot(root);
+  orig.forEach(function(e) { e[0].quaternion.copy(e[1]); e[0].position.copy(e[2]); });
+  root.updateMatrixWorld(true);
+  root.userData.clipSpeed = out; root.userData.strideScale = root.scale.x;
+}
+
 // Deep-clone a loaded GLB group (each instance needs its own transform)
 function _cloneGLB(src, _srcKey) {
   // Detect skinned meshes (rigged characters like BasePlayer.glb).
@@ -594,6 +630,7 @@ function _cloneGLB(src, _srcKey) {
   // multiple SkinnedMesh instances causes desync and recursion bugs.
   if (src.userData.animations && src.userData.animations.length > 0) {
     clone.userData.animations = src.userData.animations;
+    clone.userData.clipSpeed = src.userData.clipSpeed || {}; clone.userData.strideScale = src.userData.strideScale || clone.scale.x;
     clone.userData.mixer      = new THREE.AnimationMixer(clone);
 
     // Build name-keyed map — NEVER use numeric indices (order varies per model)

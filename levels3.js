@@ -335,6 +335,9 @@ LV.blockMat = function(type) {
   LV._bm = LV._bm || {};
   if (LV._bm[type]) return LV._bm[type];
   var m = new THREE.MeshStandardMaterial({ map: LV.blockTex(type), roughness: 0.95, alphaTest: type === "leaves" ? 0.5 : 0, side: type === "leaves" ? THREE.DoubleSide : THREE.FrontSide });
+  // top faces catch the full sun and sky light: keep the grass a rich green instead of washing out pale
+  if (type === "grass_top") m.color.setRGB(0.58, 0.74, 0.5);
+  if (type === "sand") m.color.setRGB(0.88, 0.86, 0.8);
   m.userData.shared = true;
   return (LV._bm[type] = m);
 };
@@ -346,7 +349,9 @@ LV.voxelMesh = function(c, V, kinds) {
     var h = V.g[j * V.nx + i]; if (h === -Infinity) continue;
     var k = V.k[j * V.nx + i], K = kinds[k]; if (!K) continue;
     var lo = Math.min(LV.voxelAt(V, i - 1, j), LV.voxelAt(V, i + 1, j), LV.voxelAt(V, i, j - 1), LV.voxelAt(V, i, j + 1));
+    // draw from the top block down to the lowest exposed neighbour — the top block always (flat ground was invisible)
     var bottom = K.bottom !== undefined ? K.bottom : (lo === -Infinity ? h - (K.depth || 3) : Math.max(lo, h - 6));
+    bottom = Math.min(bottom, h - 1);
     for (var y = h - 1; y >= bottom - 0.01; y--) {
       var t = y === h - 1 ? K.top : (h - 1 - y < 3 ? K.sub : K.deep);
       (lists[t] = lists[t] || []).push(V.x0 + i + 0.5, y + 0.5, V.z0 + j + 0.5);

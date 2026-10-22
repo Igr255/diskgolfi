@@ -722,6 +722,9 @@ ENT.spawnAll = function(h, spawns, idx) {
     for (var k = 0; k < 30; k++) {
       var a = srng() * 6.28, r = Math.sqrt(srng()) * z.r, x = z.x + Math.cos(a) * r, zz = z.z + Math.sin(a) * r;
       var g = c.heightAt(x, zz); if (g < c.hazardAt(x, zz).level + 0.3) continue;
+      // never on (or right next to) a bridge or stepping stone — they'd block the crossing
+      var onX = false; for (var q = 0; q < 5 && !onX; q++) { var sp = c.supportAt(x + (q ? Math.cos(q * 1.571) * 1.5 : 0), zz + (q ? Math.sin(q * 1.571) * 1.5 : 0)); if (sp.solid && sp.solid.crossing) onX = true; }
+      if (onX) continue;
       if (Math.hypot(x - c.tee.x, zz - c.tee.z) < (clear || 5) || Math.hypot(x - c.basket.x, zz - c.basket.z) < (clear || 4)) continue;
       if (c.ceiling !== null && c.ceiling !== undefined && g > c.ceiling - 2) continue;
       return { x: x, z: zz, y: g };
@@ -948,6 +951,34 @@ ENT.update = function(dt) {
     catch (e) { if (!o._err) console.error("entity " + o.type + ":", e); o._err = true; o.update = null; continue; }
     if (o.update !== ENT.B.pendulum && o.mesh) ENT.sync(o);
     o.knockCD = (o.knockCD || 0) - dt;
+  }
+  // Bring the animated ones to life: stride-matched gaits, lean, and idle ones turn to watch players
+  var players = [];
+  if (typeof PL !== "undefined" && phase !== "MENU") players.push(PL.pos);
+  if (typeof mpMode !== "undefined" && mpMode) remotePlayers.forEach(function(rp) { if (rp && rp.body) players.push(rp.body); });
+  for (var a = 0; a < ENT.list.length; a++) {
+    var e2 = ENT.list[a], m2 = e2.mesh;
+    if (!m2 || !m2.userData.glbLoaded || !m2.userData.clipActions) continue;
+    var spd = e2._ax === undefined ? 0 : Math.hypot(e2.x - e2._ax, e2.z - e2._az) / Math.max(dt, 1e-3);
+    e2._spd = (e2._spd || 0) + (Math.min(spd, 20) - (e2._spd || 0)) * Math.min(1, dt * 10);
+    e2._ax = e2.x; e2._az = e2.z;
+    if (e2.update && !e2.fly && !(guest && ENT.isAI(e2)) && e2._spd < 0.15 && /critter|dancer|minion|jogger/.test(e2.type) && players.length) {
+      var best = null, bd = 7;
+      players.forEach(function(pp) { var d = Math.hypot(pp.x - e2.x, pp.z - e2.z); if (d < bd) { bd = d; best = pp; } });
+      if (best && e2.type !== "dancer") {
+        var want = Math.atan2(best.x - e2.x, best.z - e2.z), dyaw = want - e2.yaw;
+        while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+        e2.yaw += dyaw * Math.min(1, dt * 2.5);
+        m2.rotation.y = e2.yaw + (e2.yawOff || 0);
+      }
+    }
+    ANIM.drive(m2, e2._spd, dt, { grounded: !e2.fly, ko: !!e2.fly });
+    // heads follow players walking by
+    if (!e2.fly && players.length && e2.type !== "dancer") {
+      var lt = null, ld = 7;
+      players.forEach(function(pp) { var d3 = Math.hypot(pp.x - e2.x, pp.z - e2.z); if (d3 < ld) { ld = d3; lt = pp; } });
+      ANIM.look(m2, lt ? new THREE.Vector3(lt.x, lt.y + 1.6, lt.z) : null, dt);
+    }
   }
   // Host → everyone: creature positions ~8 times a second
   if (typeof mpMode !== "undefined" && mpMode && myIdx === 0 && typeof sendToAll === "function") {

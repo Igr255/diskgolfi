@@ -330,6 +330,7 @@ function doThrow() {
 
   if (typeof PU !== "undefined" && PU.fireNext) { launchVel.multiplyScalar(1.4); PU.fireNext = false; PU.fireThrow = true; AudioEngine.sfx("energy"); }
   if (typeof BT !== "undefined") BT._hitThisThrow = {};
+  if (typeof CAMFX !== "undefined") CAMFX.kick(4 + throwPower * 6);
   discVel.copy(launchVel);
   discSpin = d.maxSpin * throwPower;
   throwCount++;

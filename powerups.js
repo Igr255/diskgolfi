@@ -107,6 +107,7 @@ function spawnPowerups(hole, idx) {
     var px = wp.x + (srng() - 0.5) * 8, pz = wp.z + (srng() - 0.5) * 8, ty = C.heightAt(px, pz);
     if (ty < C.hazardAt(px, pz).level + 0.3) continue;
     if (C.ceiling && ty + 2.4 > C.ceiling) continue;
+    var sup = C.supportAt(px, pz); if (sup.solid && sup.solid.crossing) continue;   // not on bridges / stepping stones
     var g = PU.bagModel(); g.position.set(px, ty + 1.05, pz);
     courseGrp.add(g);
     PU.tokens.push({ i: i, x: px, y: ty, z: pz, mesh: g, taken: false, back: 0 });

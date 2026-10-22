@@ -601,6 +601,7 @@ function skipIntro() {
 // ── LOAD HOLE ────────────────────────────────────────────────────────────────
 function loadHole(idx) {
   holeIdx = idx;
+  CAMFX.fadeIn();
   _menuBackdrop = false;
   if (!basketWP)     basketWP     = new THREE.Vector3();
   if (!lastValidPos) lastValidPos = new THREE.Vector3();
@@ -663,6 +664,7 @@ function loadHole(idx) {
   initTrail();
   spawnPowerups(h, idx);
   BT.onHoleStart(h);
+  LIFE.build(h, C);
 
   GFX.fogBoost = h.mods.indexOf("fog") >= 0 ? 3.2 : 1;
   // Weather that fits the world: none indoors, in space or in the neon clubs
@@ -1045,7 +1047,7 @@ function _buildDiscMarker() {
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; g.add(ring);
   var col = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.35, 6, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x8adcff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, map: GFX._texCache.beacon || null }));
   col.position.y = 3; g.add(col);
-  g.userData.ring = ring; g.visible = false;
+  g.userData.ring = ring; g.userData.col = col; g.visible = false;
   return g;
 }
 
@@ -1461,6 +1463,7 @@ function animate() {
   T += dt;
 
   // Always update GLB mixers — must happen before any early return
+  ANIM.restore();   // undo last frame's head turns before the clips pose the bones again
   if (typeof _glbMixers !== "undefined") _glbMixers.forEach(function(m){m.update(dt);});
   if (typeof COS !== "undefined") COS.tick(T);
 
@@ -1480,6 +1483,11 @@ function animate() {
         mesh._wantAnim = _want;
         if (typeof switchAvatarAnim === "function") switchAvatarAnim(mesh, _want);
       }
+      var _air = rp.body && HOLES[holeIdx] ? rp.body.y - terrainY(rp.body.x, rp.body.z, HOLES[holeIdx], holeIdx) > 0.35 : false;
+      ANIM.drive(mesh, _rvm, dt, { grounded: !_air, ko: rp.anim === "death" });
+      // they watch their own disc in flight, otherwise whoever is closest
+      var _lt = rp.flying ? rp.discPos : ANIM.nearestFace(rp.body, mesh);
+      ANIM.look(mesh, _lt, dt);
     });
   }
 
@@ -1617,8 +1625,10 @@ function animate() {
   stepPhysics(dt);
   if (typeof VEH !== "undefined") VEH.update(dt);
   if (typeof WORLD !== "undefined") WORLD.update(performance.now() / 1000);
+  LIFE.update(dt, T);
   if(_screenShakeT>0){_screenShakeT-=dt;_screenShake*=Math.pow(0.82, dt*60);if(_screenShakeT<=0)_screenShake=0;}
   updateCamera(dt);
+  CAMFX.update(dt);
   _updateOccluders(dt);
   if (typeof updateBasketFX === "function") updateBasketFX(dt);
   if (trajLandRing && !(phase === "AIMING" && dragging)) trajLandRing.visible = false;
@@ -1690,11 +1700,20 @@ function animate() {
       else { discMesh.rotation.x = 1.2; discMesh.rotation.y += dt * 4; }
     }
   }
+  if (localAvatarMesh && localAvatarMesh.userData.glbLoaded) {
+    var _ws = phase === "WALKING" ? Math.hypot(PL.vel.x, PL.vel.z) : 0;
+    ANIM.drive(localAvatarMesh, _ws, dt, { grounded: PL.onGround || (phase !== "WALKING" && BT.stunT <= 0), fidget: phase === "WALKING" && !BT.locked(), ko: BT.stunT > 0 && BT.frozenT <= 0 });
+    // eyes on the disc while it flies, down the line while aiming, otherwise on whoever's near
+    var _lookAt = phase === "FLYING" ? discPos : phase === "AIMING" ? new THREE.Vector3(PL.pos.x + Math.sin(aimAngle) * 20, PL.pos.y + 1.5, PL.pos.z - Math.cos(aimAngle) * 20) : ANIM.nearestFace(PL.pos, localAvatarMesh);
+    if (!BT.locked()) ANIM.look(localAvatarMesh, _lookAt, dt);
+  }
   if (!discMarker) { discMarker = _buildDiscMarker(); scene.add(discMarker); }
   if (BT.finished) discMarker.visible = false;
   if (discMarker.visible) {
     discMarker.position.set(discPos.x, discPos.y - 0.05, discPos.z);
     var _pk = 1 + Math.sin(T * 4) * 0.12; discMarker.userData.ring.scale.set(_pk, _pk, _pk);
+    // the beam guides you from afar; up close it would fog the whole screen, so it fades out
+    if (discMarker.userData.col) { var _cd = camera.position.distanceTo(discMarker.position); discMarker.userData.col.material.opacity = 0.35 * Math.max(0, Math.min(1, (_cd - 6) / 10)); discMarker.userData.col.visible = _cd > 6; }
   }
 
   // Broadcast position ~15Hz

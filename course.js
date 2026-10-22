@@ -37,7 +37,7 @@ function Course(hole) {
 
 // ── Spatial index ────────────────────────────────────────────────────────────
 Course.prototype._index = function(s) {
-  var r = s.shape === "cyl" ? s.r + (s.taper || 0) : Math.hypot(s.hw, s.hd);
+  var r = s.shape === "cyl" ? s.r * (s.profMax || 1) + (s.taper || 0) : Math.hypot(s.hw, s.hd);
   var x0 = Math.floor((s.x - r) / COURSE_CELL), x1 = Math.floor((s.x + r) / COURSE_CELL);
   var z0 = Math.floor((s.z - r) / COURSE_CELL), z1 = Math.floor((s.z + r) / COURSE_CELL);
   for (var i = x0; i <= x1; i++) for (var j = z0; j <= z1; j++) {
@@ -48,9 +48,10 @@ Course.prototype._index = function(s) {
 Course.prototype._contains = function(s, x, z) {
   if (s.disabled) return -Infinity;
   if (s.shape === "cyl") {
-    var d = Math.hypot(x - s.x, z - s.z);
-    if (d < s.r) return s.top;
-    if (s.taper && d < s.r + s.taper) return s.top - (d - s.r) * 2.0;
+    var d = Math.hypot(x - s.x, z - s.z), rr = s.r;
+    if (s.prof) rr *= GFX.profAt(s.prof, Math.atan2(z - s.z, x - s.x));   // organic island outline
+    if (d < rr) return s.dome ? s.top + s.dome * (1 - (d / rr) * (d / rr)) : s.top;
+    if (s.taper && d < rr + s.taper) return s.top - (d - rr) * (s.slope || 2.0);
     return -Infinity;
   }
   var dx = x - s.x, dz = z - s.z;
@@ -175,7 +176,7 @@ Course.prototype.box = function(o) {
 // Cylinder solid (stones, pillars, round platforms). o: {x,z,r,top,h,mat,taper,kind,segments,visual}
 Course.prototype.cyl = function(o) {
   var bottom = o.bottom !== undefined ? o.bottom : o.top - (o.h || 1);
-  var s = this.addSolid({ shape: "cyl", x: o.x, z: o.z, r: o.r, top: o.top, bottom: bottom, taper: o.taper || 0, kind: o.kind, surf: o.surf, mover: !!o.mover, crumble: o.crumble, bounce: o.bounce });
+  var s = this.addSolid({ shape: "cyl", x: o.x, z: o.z, r: o.r, top: o.top, bottom: bottom, taper: o.taper || 0, kind: o.kind, surf: o.surf, mover: !!o.mover, crumble: o.crumble, bounce: o.bounce, prof: o.prof || null, profMax: o.profMax || 1, dome: o.dome || 0, slope: o.slope });
   if (o.visual !== false) {
     var h = o.top - bottom;
     var geo = new THREE.CylinderGeometry(o.r * (o.topScale || 1), o.r * (o.botScale || 1), h, o.segments || 24);

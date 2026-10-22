@@ -116,7 +116,7 @@ var PL = {
     if (this.jumpBuf > 0) this.jumpBuf -= dt;
     if (this.jumpBuf > 0 && this.coyote > 0 && !(typeof BT !== "undefined" && BT.locked())) {
       this.vel.y = this.JUMP * (c.gravity < 1 ? 0.9 : 1) * (typeof PU !== "undefined" ? PU.jumpMul() : 1); this.onGround = false; this.coyote = 0; this.jumpBuf = 0;
-      AudioEngine.sfx("jump");
+      AudioEngine.sfx("jump"); ANIM.squash(localAvatarMesh, -0.14);
       this._setAnim("jump");
     }
     // Vertical
@@ -136,7 +136,7 @@ var PL = {
       if (p.y <= g) {
         var impact = -this.vel.y;
         p.y = g; this.vel.y = 0; this.onGround = true;
-        if (this.airT > 0.25) { AudioEngine.sfx("land", Math.min(1, impact / 14)); this._setAnim("grounded"); this.animT = 0.18; }
+        if (this.airT > 0.25) { AudioEngine.sfx("land", Math.min(1, impact / 14)); this._setAnim("grounded"); this.animT = 0.18; ANIM.squash(localAvatarMesh, Math.min(0.32, impact * 0.022)); if (impact > 9 && typeof spawnDust === "function") spawnDust(p.clone(), Math.min(1, impact / 16)); }
         this.airT = 0;
       }
     } else this.airT = 0;
@@ -162,13 +162,20 @@ var PL = {
     if (typeof BT !== "undefined" && BT.locked()) this._setAnim(BT.frozenT > 0 ? "idle" : "death");
     else if (this.animT > 0) this.animT -= dt;
     else if (!this.onGround) this._setAnim(this.vel.y > 0 ? "jump" : this.airT > 0.35 ? "jump" : this.anim);
-    else this._setAnim(hs > 5.6 ? "sprint" : hs > 0.5 ? "walk" : "idle");
+    else this._setAnim(hs > 2.4 ? "sprint" : hs > 0.4 ? "walk" : "idle");   // clips are stride-matched in ANIM.drive
     // Character aura (cosmetic)
     if (typeof COS !== "undefined") COS.auraStep(localAvatarMesh, p, hs, dt);
     // Footsteps
     if (this.onGround && hs > 0.8) {
       this.stepAcc += dt * hs / (hs > 5.6 ? 2.0 : 1.5);
-      if (this.stepAcc > 1) { this.stepAcc = 0; AudioEngine.sfx("step", PL.surfHardness(c, sup)); }
+      if (this.stepAcc > 1) {
+        this.stepAcc = 0; AudioEngine.sfx("step", PL.surfHardness(c, sup));
+        // little dust puffs kicked up when sprinting
+        if (hs > 5.6 && typeof _pMesh === "function") for (var dq = 0; dq < 3; dq++) {
+          var pm = _pMesh("sph", c.surf === "snow" ? 0xf4f8ff : 0xd8ccb0, 0.07 + Math.random() * 0.06, false);
+          _pAdd(pm, new THREE.Vector3(p.x + (Math.random() - 0.5) * 0.3, p.y + 0.06, p.z + (Math.random() - 0.5) * 0.3), new THREE.Vector3(-this.vel.x * 0.06 + (Math.random() - 0.5) * 0.8, 0.5 + Math.random() * 0.5, -this.vel.z * 0.06 + (Math.random() - 0.5) * 0.8), 0.55, { grav: 1.2, drag: 2.5 });
+        }
+      }
     }
     if (keys.ArrowLeft) { this.camYaw -= 2.2 * dt; this.lastCamInput = T; }
     if (keys.ArrowRight) { this.camYaw += 2.2 * dt; this.lastCamInput = T; }

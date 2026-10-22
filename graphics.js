@@ -1028,6 +1028,31 @@ GFX._islandMats = function(theme) {
 };
 
 // opts: {x, z, r, surfY, waterY, theme, type, floating, seed}
+// ── Organic island shapes ────────────────────────────────────────────────────
+// A radius profile around the island (multipliers of the nominal radius) built from
+// a few low harmonics plus noise: lobed, bean, kidney and blob shapes rather than
+// discs. Collision (Course._contains) reads the same profile, so the walkable edge
+// is exactly the visible edge.
+GFX.islandShape = function(seed, calm) {
+  var rnd = _gfxRng((seed * 2654435761) >>> 0), N = 48, prof = new Float32Array(N), k = calm ? 0.35 : 1;
+  var a2 = (0.06 + rnd() * 0.16) * k, a3 = (0.04 + rnd() * 0.1) * k, a5 = (0.02 + rnd() * 0.05) * k;
+  var p2 = rnd() * 6.28, p3 = rnd() * 6.28, p5 = rnd() * 6.28, mx = 0, mn = 9;
+  for (var i = 0; i < N; i++) {
+    var a = i / N * Math.PI * 2;
+    var m = 1 + a2 * Math.sin(2 * a + p2) + a3 * Math.sin(3 * a + p3) + a5 * Math.sin(5 * a + p5) + (_gfxFbm2(Math.cos(a) * 1.6 + seed * 0.37, Math.sin(a) * 1.6, 3) - 0.5) * 0.14 * k;
+    prof[i] = m; mx = Math.max(mx, m); mn = Math.min(mn, m);
+  }
+  // keep the area about the same as the nominal disc and never pinch below 78 %
+  for (var j = 0; j < N; j++) prof[j] = Math.max(0.78, prof[j] / (0.5 * (mx + mn)) );
+  mx = 0; for (var q = 0; q < N; q++) mx = Math.max(mx, prof[q]);
+  return { prof: prof, max: mx, dome: calm ? 0 : 0.15 + rnd() * 0.55, beach: !calm && rnd() < 0.45, tint: (rnd() - 0.5) * 0.16 };
+};
+GFX.profAt = function(prof, a) {
+  if (!prof) return 1;
+  var N = prof.length, f = ((a / (Math.PI * 2)) % 1 + 1) % 1 * N, i = Math.floor(f), t = f - i;
+  return prof[i % N] * (1 - t) + prof[(i + 1) % N] * t;
+};
+
 GFX.buildIsland = function(o) {
   var P = GFX.themePreset(o.theme), S = P.surf, mats = GFX._islandMats(o.theme);
   var grp = new THREE.Group();
@@ -1036,6 +1061,11 @@ GFX.buildIsland = function(o) {
   var pixel = S.style === "pixel", tileish = S.style === "tile" || S.style === "neon" || S.style === "dance" || S.style === "concrete";
   var segs = pixel ? 8 : 64, rings = 9;
   var cTop = new THREE.Color(S.top), cEdge = new THREE.Color(S.edge), cR1 = new THREE.Color(S.rock1), cR2 = new THREE.Color(S.rock2);
+  if (pixel) o.prof = null;
+  var prof = o.prof || null, dome = o.dome || 0, beach = !!o.beach && !pixel;
+  if (o.tint) { var hsl = {}; cTop.getHSL(hsl); cTop.setHSL(hsl.h + o.tint * 0.25, Math.min(1, hsl.s * (1 + o.tint)), hsl.l * (1 + o.tint * 0.6)); cR1.multiplyScalar(1 + o.tint); cR2.multiplyScalar(1 - o.tint * 0.5); }
+  var cSand = new THREE.Color(0xd2b47e).lerp(cEdge, 0.2);
+  var drop = o.surfY - o.waterY;
   var isGreen = o.type === "basket" && S.style === "grass";
   var tmp = new THREE.Color();
   var texRep = (mats.tex && mats.tex.repeat) || 4;
@@ -1047,16 +1077,18 @@ GFX.buildIsland = function(o) {
   var ringStart = [];
   var profile = []; // radial profile for top + chamfer (radius, dy)
   for (var ri = 1; ri <= rings; ri++) profile.push([r * ri / rings, 0]);
-  if (!pixel) { profile.push([r + 0.12, -0.12]); profile.push([r + 0.3, -0.5]); profile.push([r + 0.48, -0.95]); }
+  if (beach) { [[0.8, 0.15], [1.8, 0.38], [3.0, 0.66], [4.6, 1.0]].forEach(function(b) { profile.push([r + b[0], -(drop + 0.6) * b[1]]); }); }
+  else if (!pixel) { profile.push([r + 0.12, -0.12]); profile.push([r + 0.3, -0.5]); profile.push([r + 0.48, -0.95]); }
   else profile.push([r + 0.02, -0.02]);
   for (var pi = 0; pi < profile.length; pi++) {
     ringStart.push(pos.length / 3);
     var pr = profile[pi][0], dy = profile[pi][1];
     for (var si = 0; si < segs; si++) {
-      var a = si / segs * Math.PI * 2;
+      var a = si / segs * Math.PI * 2, pm = GFX.profAt(prof, a), isTop = pi < rings;
       var wob = pixel ? 0 : (_gfxFbm2(Math.cos(a) * 2 + seed * 0.13, Math.sin(a) * 2) - 0.5) * (dy < 0 ? 0.35 : 0);
-      var px = Math.cos(a) * (pr + wob), pz = Math.sin(a) * (pr + wob);
-      pos.push(px, dy, pz);
+      var rad = isTop ? pr * pm : r * pm + (pr - r);
+      var px = Math.cos(a) * (rad + wob), pz = Math.sin(a) * (rad + wob);
+      pos.push(px, dy + (isTop && dome ? dome * (1 - (pr / r) * (pr / r)) : 0), pz);
       uv.push((o.x + px) / texRep, (o.z + pz) / texRep);
       // Colour: big soft variation; dirt toward the edge; lighter "green" near basket
       var wx = o.x + px, wz = o.z + pz;
@@ -1067,6 +1099,8 @@ GFX.buildIsland = function(o) {
       var edgeK = dy < 0 ? 1 : Math.max(0, (pr - (r - 0.9)) / 0.9) * 0.55;
       if (!tileish && !pixel) tmp.lerp(cEdge, edgeK);
       if (isGreen && pr < r * 0.55) tmp.lerp(cTop.clone().lerp(new THREE.Color(0xd8ff90), 0.18), 0.7);
+      if (beach && !isTop) tmp.copy(cSand).multiplyScalar(0.92 + n * 0.16 - (-dy / (drop + 0.6)) * 0.18);   // sandy beach, darker where wet
+      else if (beach && pr > r * 0.8) tmp.lerp(cSand, (pr - r * 0.8) / (r * 0.2) * 0.6);
       col.push(tmp.r, tmp.g, tmp.b);
     }
   }
@@ -1124,7 +1158,7 @@ GFX.buildIsland = function(o) {
         var nz = _gfxFbm2(Math.cos(ang) * 3 + seed * 0.07, Y0 * 0.35 + Math.sin(ang) * 3, 4);
         disp = (nz - 0.5) * (cr === 0 ? 0 : 1.1) * Math.min(1, cr / 2);
       }
-      var rr = Math.max(0.05, R0 + disp);
+      var rr = Math.max(0.05, r * GFX.profAt(prof, ang) + (R0 - r) + disp);
       var cx = Math.cos(ang) * rr, cz = Math.sin(ang) * rr;
       cp.push(cx, Y0, cz);
       cu.push(ang * (r + 1) / (pixel ? 1 : 3.0), Y0 / (pixel ? 1 : 3.0));
@@ -1162,6 +1196,8 @@ GFX.buildIsland = function(o) {
   if (fl) grp.add(fl);
   var pb = GFX.buildPebbles(o, P, rnd);
   if (pb) grp.add(pb);
+  var dc = GFX.islandDecor(o, P, rnd);
+  if (dc) grp.add(dc);
 
   // Smallest radius of the (noise-displaced) cliff where it meets the water.
   // Foam starts there, so it never fills the gaps where the cliff dips inward.
@@ -1169,19 +1205,62 @@ GFX.buildIsland = function(o) {
   for (var wi = 0; wi < cliffRings.length - 1; wi++) {
     var ya = cliffRings[wi][1], yb = cliffRings[wi + 1][1];
     if (wlY <= ya && wlY >= yb) {
-      var k = (ya - wlY) / Math.max(0.001, ya - yb), minR = Infinity;
+      var k = (ya - wlY) / Math.max(0.001, ya - yb), minR = Infinity, sumR = 0;
       for (var sv = 0; sv <= csegs; sv++) {
         var ia = (wi * (csegs + 1) + sv) * 3, ib = ((wi + 1) * (csegs + 1) + sv) * 3;
         var ra = Math.hypot(cp[ia], cp[ia + 2]), rb = Math.hypot(cp[ib], cp[ib + 2]);
-        minR = Math.min(minR, ra + (rb - ra) * k);
+        minR = Math.min(minR, ra + (rb - ra) * k); sumR += ra + (rb - ra) * k;
       }
-      wlR = minR;
+      wlR = prof ? sumR / (csegs + 1) * 0.97 : minR;
       break;
     }
   }
   if (pixel) wlR *= Math.cos(Math.PI / segs);   // octagon: use the inscribed radius
   grp.userData.waterlineR = floating ? 0 : wlR + 0.05;
   return grp;
+};
+
+// ── Island dressing: bushes, boulders, reeds, palms — around the rim, clear of paths ──
+GFX.islandDecor = function(o, P, rnd) {
+  var st = P.surf.style; if (st === "pixel" || st === "tile" || st === "neon" || st === "dance" || st === "concrete") return null;
+  var th = o.theme, spooky = /eerie|tornado/.test(th), lava = /terrifying|screaming/.test(th), tropical = /funny|minion|emote/.test(th);
+  var parts = [], col = function(g, hex, v) { var c = new THREE.Color(hex).multiplyScalar(v || 1), n = g.attributes.position.count, a = new Float32Array(n * 3); for (var i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute("color", new THREE.BufferAttribute(a, 3)); return g; };
+  var clear = o.clear || [], R = function(a) { return o.r * GFX.profAt(o.prof, a); };
+  var yAt = function(d, a) { var Ra = R(a); return o.dome ? o.dome * (1 - (d / Ra) * (d / Ra)) : 0; };
+  var ok = function(a, d) {
+    for (var i = 0; i < clear.length; i++) { var da = Math.abs(((a - clear[i]) % 6.283 + 9.42) % 6.283 - 3.14); if (da < 0.55) return false; }
+    var x = Math.cos(a) * d, z = Math.sin(a) * d;
+    for (var k = 0; k < (o.avoid || []).length; k++) if (Math.hypot(o.x + x - o.avoid[k].x, o.z + z - o.avoid[k].z) < o.avoid[k].r + 1.5) return false;
+    return d > 1.8;
+  };
+  var n = Math.round(o.r * (0.9 + rnd() * 0.8));
+  for (var i = 0; i < n; i++) {
+    var a = rnd() * 6.283, d = R(a) * (0.62 + rnd() * 0.3);
+    if (!ok(a, d)) continue;
+    var x = Math.cos(a) * d, z = Math.sin(a) * d, y = yAt(d, a), kind = rnd();
+    if (kind < 0.45) {   // bush: a few lumpy balls
+      var bc = spooky ? 0x3a3a30 : lava ? 0x2a1a14 : 0x3f7a2a, nb = 2 + Math.floor(rnd() * 3), s0 = 0.35 + rnd() * 0.35;
+      for (var b = 0; b < nb; b++) { var bg = new THREE.IcosahedronGeometry(s0 * (0.7 + rnd() * 0.5), 0); bg.scale(1, 0.8, 1); bg.translate(x + (rnd() - 0.5) * s0 * 1.6, y + s0 * 0.55, z + (rnd() - 0.5) * s0 * 1.6); parts.push(col(bg, bc, 0.8 + rnd() * 0.4)); }
+    } else if (kind < 0.7) {   // boulder
+      var rg = new THREE.DodecahedronGeometry(0.25 + rnd() * 0.45, 0); rg.scale(1, 0.6 + rnd() * 0.3, 1); rg.rotateY(rnd() * 3); rg.translate(x, y + 0.1, z);
+      parts.push(col(rg, lava ? 0x1a1414 : new THREE.Color(P.surf.rock2).getHex(), 0.85 + rnd() * 0.3));
+    } else if (kind < 0.85 && tropical && o.type === "normal" && d > R(a) * 0.72) {   // palm (never on the tee / basket islands)
+      var hgt = 3 + rnd() * 2, lean = (rnd() - 0.5) * 0.5;
+      for (var s = 0; s < 6; s++) { var tg = new THREE.CylinderGeometry(0.11, 0.14, hgt / 6 + 0.05, 6); tg.translate(x + Math.sin(lean) * s * hgt / 6, y + (s + 0.5) * hgt / 6, z); parts.push(col(tg, 0x8a6a42, 0.85 + (s % 2) * 0.15)); }
+      var topX = x + Math.sin(lean) * hgt, topY = y + hgt;
+      for (var f = 0; f < 7; f++) { var fr = new THREE.ConeGeometry(0.32, 2.4, 4); fr.rotateZ(Math.PI / 2 + 0.45); fr.translate(1.15, 0, 0); fr.rotateY(f / 7 * 6.283 + rnd() * 0.3); fr.translate(topX, topY, z); parts.push(col(fr, 0x3f8a2a, 0.85 + rnd() * 0.3)); }
+    } else {   // reeds / tall grass tuft at the rim (dead sticks when spooky)
+      var rc = spooky ? 0x5a5040 : lava ? 0x3a2a20 : 0x7aa040;
+      for (var t = 0; t < 5; t++) { var rd = new THREE.ConeGeometry(0.035, 0.6 + rnd() * 0.6, 3); rd.rotateZ((rnd() - 0.5) * 0.5); rd.rotateX((rnd() - 0.5) * 0.5); rd.translate(x + (rnd() - 0.5) * 0.4, y + 0.35, z + (rnd() - 0.5) * 0.4); parts.push(col(rd, rc, 0.8 + rnd() * 0.4)); }
+    }
+  }
+  if (!parts.length) return null;
+  var mat = GFX._matCache.decor || (GFX._matCache.decor = GFX.addSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true }), 0.18, 5));
+  mat.userData.shared = true;
+  var m = new THREE.Mesh(GFX.mergeGeometries(parts), mat);
+  m.position.set(o.x, o.surfY, o.z); m.castShadow = true; m.receiveShadow = true;
+  m.userData.noBatch = true;   // keep island-local heights: the sway shader bends by height above the ground
+  return m;
 };
 
 // ── Grass blades ─────────────────────────────────────────────────────────────
@@ -1252,8 +1331,8 @@ GFX.buildGrassField = function(o, P, rnd) {
   var avoid = o.avoid || [];
   var k = 0;
   for (var i = 0; i < count * 1.4 && k < count; i++) {
-    var a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (o.r - 0.15);
-    var x = Math.cos(a) * d, z = Math.sin(a) * d;
+    var a = rnd() * Math.PI * 2, Ra = o.r * GFX.profAt(o.prof, a), d = Math.sqrt(rnd()) * (Ra - 0.15);
+    var x = Math.cos(a) * d, z = Math.sin(a) * d, gy = o.dome ? o.dome * (1 - (d / Ra) * (d / Ra)) : 0;
     // clumping: thin grass in noisy patches
     var wx = o.x + x, wz = o.z + z;
     var cl = _gfxFbm2(wx * 0.18, wz * 0.18, 3);
@@ -1265,7 +1344,7 @@ GFX.buildGrassField = function(o, P, rnd) {
     var h = (basketGreen ? 0.08 : 0.16) + rnd() * (basketGreen ? 0.06 : 0.22) * (0.6 + cl * 0.8);
     q.setFromAxisAngle(up, rnd() * Math.PI * 2);
     sc.set(0.8 + rnd() * 0.6, h, 1);
-    p.set(x, 0.0, z);
+    p.set(x, gy, z);
     m4.compose(p, q, sc);
     mesh.setMatrixAt(k, m4);
     var v = 0.8 + rnd() * 0.4;
@@ -1296,11 +1375,11 @@ GFX.buildFlowers = function(o, P, rnd) {
   var mesh = new THREE.InstancedMesh(GFX._flowerGeo, mat, n);
   var m4 = new THREE.Matrix4(), c = new THREE.Color(), k = 0;
   for (var i = 0; i < n * 2 && k < n; i++) {
-    var a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (o.r - 0.4);
+    var a = rnd() * Math.PI * 2, Ra = o.r * GFX.profAt(o.prof, a), d = Math.sqrt(rnd()) * (Ra - 0.4);
     var x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (_gfxFbm2((o.x + x) * 0.25 + 11, (o.z + z) * 0.25, 2) < 0.52) continue;
     var s = 0.7 + rnd() * 0.7;
-    m4.makeRotationY(rnd() * 6.28).scale(new THREE.Vector3(s, s, s)).setPosition(x, 0, z);
+    m4.makeRotationY(rnd() * 6.28).scale(new THREE.Vector3(s, s, s)).setPosition(x, o.dome ? o.dome * (1 - (d / Ra) * (d / Ra)) : 0, z);
     mesh.setMatrixAt(k, m4);
     c.set(P.flowers[Math.floor(rnd() * P.flowers.length)]); mesh.setColorAt(k, c); k++;
   }
@@ -1321,9 +1400,9 @@ GFX.buildPebbles = function(o, P, rnd) {
   var mesh = new THREE.InstancedMesh(GFX._pebbleGeo, mat, n);
   var m4 = new THREE.Matrix4(), e = new THREE.Euler(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   for (var i = 0; i < n; i++) {
-    var a = rnd() * 6.28, d = o.r * (0.55 + rnd() * 0.42);
+    var a = rnd() * 6.28, Ra = o.r * GFX.profAt(o.prof, a), d = Ra * (0.55 + rnd() * 0.42);
     var k = 0.4 + rnd() * 1.6;
-    p.set(Math.cos(a) * d, 0.02, Math.sin(a) * d); e.set(rnd() * 3, rnd() * 3, rnd() * 3); q.setFromEuler(e); s.set(k, k * 0.6, k);
+    p.set(Math.cos(a) * d, 0.02 + (o.dome ? o.dome * (1 - (d / Ra) * (d / Ra)) : 0), Math.sin(a) * d); e.set(rnd() * 3, rnd() * 3, rnd() * 3); q.setFromEuler(e); s.set(k, k * 0.6, k);
     m4.compose(p, q, s); mesh.setMatrixAt(i, m4);
   }
   mesh.instanceMatrix.needsUpdate = true;

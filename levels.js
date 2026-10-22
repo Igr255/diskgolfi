@@ -121,38 +121,113 @@ LV.pointAt = function(pts, t) {
 function _sstep(a, b, x) { var t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
 // Wooden bridge (ramp) between two points with rope rails
-LV.bridge = function(c, ax, az, ay, bx, bz, by, width) {
-  var len = Math.hypot(bx - ax, bz - az), rot = Math.atan2(bx - ax, bz - az);
-  var s = c.box({ x: (ax + bx) / 2, z: (az + bz) / 2, w: width, d: len, top: ay, top2: by, ramp: true, bottom: Math.min(ay, by) - 0.25, rot: rot, mat: CM.get("wood"), kind: "platform", surf: "wood" });
-  var postM = CM.get("wood", 0x6a4a2a), ropeM = CM.get("plastic", 0xd8c8a0);
-  var n = Math.max(2, Math.round(len / 2.5));
-  [-1, 1].forEach(function(side) {
-    var pts = [];
-    for (var i = 0; i <= n; i++) {
-      var t = i / n, x = ax + (bx - ax) * t + Math.cos(rot) * side * width / 2, z = az + (bz - az) * t - Math.sin(rot) * side * width / 2, y = ay + (by - ay) * t;
-      var p = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.0, 6), postM); p.position.set(x, y + 0.45, z); p.castShadow = true; c.group.add(p);
-      pts.push(new THREE.Vector3(x, y + 0.9 - (i > 0 && i < n ? 0.08 : 0), z));
-    }
-    var rope = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n * 4, 0.025, 4, false), ropeM); c.group.add(rope);
+// A proper footbridge: individual planks on two stringers that sag a little between
+// sturdy anchor posts, rope rails, and pilings driven into the water below. Collision
+// is a chain of short ramps that follows the same curve, so you walk on the planks.
+// opts.sag: dip in metres (default grows with length; 0 for chained sections).
+LV.bridge = function(c, ax, az, ay, bx, bz, by, width, opts) {
+  opts = opts || {};
+  var len = Math.hypot(bx - ax, bz - az) || 0.01, rot = Math.atan2(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len, px = uz, pz = -ux;
+  var sag = opts.sag !== undefined ? opts.sag : Math.min(0.45, Math.max(0, len - 4) * 0.03);
+  var yAt = function(t) { return ay + (by - ay) * t - sag * 4 * t * (1 - t); };
+  var W = c.hazard ? c.hazard.level : -1.5, rnd = _gfxRng(Math.floor(Math.abs(ax * 131 + az * 71 + bx * 13)) + 7);
+  // collision: short ramps along the curve
+  var nSeg = Math.max(1, Math.ceil(len / 2.2)), first = null;
+  for (var i = 0; i < nSeg; i++) {
+    var t0 = i / nSeg, t1 = (i + 1) / nSeg, tm = (t0 + t1) / 2;
+    var seg = c.box({ x: ax + (bx - ax) * tm, z: az + (bz - az) * tm, w: width, d: len / nSeg + 0.06, top: yAt(t0), top2: yAt(t1), ramp: true,
+      bottom: Math.min(yAt(t0), yAt(t1)) - 0.3, rot: rot, visual: false, kind: "platform", surf: "wood" });
+    seg.crossing = true; if (!first) first = seg;
+  }
+  // ── visuals ──
+  var wood = CM.get("wood"), dark = CM.get("wood", 0x6a4a2a), rope = CM.get("plastic", 0xd8c8a0);
+  var nP = Math.max(2, Math.round(len / 0.3)), plankGeo = new THREE.BoxGeometry(width, 0.07, 0.25);
+  var planks = new THREE.InstancedMesh(plankGeo, wood, nP), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), col = new THREE.Color();
+  for (var k = 0; k < nP; k++) {
+    var t = (k + 0.5) / nP, slope = ((by - ay) - sag * 4 * (1 - 2 * t)) / len;
+    e.set(-Math.atan(slope) + (rnd() - 0.5) * 0.03, rot + (rnd() - 0.5) * 0.05, (rnd() - 0.5) * 0.04, "YXZ");
+    q.setFromEuler(e);
+    m4.compose(new THREE.Vector3(ax + (bx - ax) * t, yAt(t) - 0.035 + (rnd() - 0.5) * 0.015, az + (bz - az) * t), q, new THREE.Vector3(1 - rnd() * 0.06, 1, 1));
+    planks.setMatrixAt(k, m4);
+    var v = 0.78 + rnd() * 0.3; col.setRGB(v, v * (0.94 + rnd() * 0.08), v * 0.9); planks.setColorAt(k, col);
+  }
+  planks.castShadow = true; planks.receiveShadow = true; planks.userData.noBatch = true;
+  c.group.add(planks);
+  var geos = [], posts = [], ropes = [[], []];
+  // stringers under the plank ends
+  for (var j = 0; j < nSeg; j++) {
+    var a0 = j / nSeg, a1 = (j + 1) / nSeg, y0 = yAt(a0) - 0.12, y1 = yAt(a1) - 0.12, segL = len / nSeg;
+    [-1, 1].forEach(function(sd) {
+      var g = new THREE.BoxGeometry(0.1, 0.12, segL + 0.04);
+      g.rotateX(-Math.atan2(y1 - y0, segL));
+      g.rotateY(rot);
+      g.translate(ax + (bx - ax) * (a0 + a1) / 2 + px * sd * (width / 2 - 0.06), (y0 + y1) / 2, az + (bz - az) * (a0 + a1) / 2 + pz * sd * (width / 2 - 0.06));
+      geos.push(g);
+    });
+  }
+  // posts (thick anchors at the ends), rope rails and pilings into the water
+  var nPost = Math.max(2, Math.round(len / 2.4));
+  for (var pI = 0; pI <= nPost; pI++) {
+    var tp = pI / nPost, yp = yAt(tp), anchor = pI === 0 || pI === nPost;
+    [-1, 1].forEach(function(sd, si) {
+      var x = ax + (bx - ax) * tp + px * sd * (width / 2 + 0.02), z = az + (bz - az) * tp + pz * sd * (width / 2 + 0.02);
+      var r0 = anchor ? 0.11 : 0.065, hgt = anchor ? 1.25 : 1.0;
+      var pg = new THREE.CylinderGeometry(r0 * 0.9, r0, hgt, 7); pg.translate(x, yp + hgt / 2 - 0.05, z); posts.push(pg);
+      if (anchor) { var cap = new THREE.SphereGeometry(r0 * 1.15, 8, 6); cap.translate(x, yp + hgt, z); posts.push(cap); }
+      ropes[si].push(new THREE.Vector3(x, yp + 0.92 - (anchor ? 0 : 0.06), z));
+      // a piling down to the river / sea bed wherever the deck is over open water
+      var ground = c.hf ? c.hfAt(x, z) : -Infinity;
+      if (!(ground > yp - 1.2)) { var bottomY = Math.max(W - 3.5, ground === -Infinity ? W - 3.5 : ground - 0.3), pl = new THREE.CylinderGeometry(0.09, 0.11, yp - bottomY, 7); pl.translate(x, (yp + bottomY) / 2 - 0.08, z); posts.push(pl); }
+    });
+  }
+  var sm = new THREE.Mesh(GFX.mergeGeometries(geos), dark); sm.castShadow = true; sm.receiveShadow = true; c.group.add(sm);
+  var pm = new THREE.Mesh(GFX.mergeGeometries(posts), dark); pm.castShadow = true; pm.receiveShadow = true; c.group.add(pm);
+  ropes.forEach(function(pts) {
+    var rp = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 6, 0.028, 5, false), rope); rp.castShadow = true; c.group.add(rp);
+    var low = pts.map(function(v) { return v.clone().add(new THREE.Vector3(0, -0.42, 0)); });
+    var rl = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(low), low.length * 6, 0.02, 5, false), rope); c.group.add(rl);
   });
-  return s;
+  return first;
+};
+
+// A boulder that fits a stepping-stone cylinder: lumpy sides, a flat walkable top at +h/2
+LV.rockGeo = function(r, h, seed) {
+  var g = new THREE.IcosahedronGeometry(1, 2), p = g.attributes.position, v = new THREE.Vector3(), rnd = _gfxRng(seed + 1);
+  var ox = rnd() * 50, oz = rnd() * 50;
+  for (var i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    var n = 0.78 + _gfxFbm2(v.x * 1.9 + ox, v.z * 1.9 + v.y * 1.6 + oz, 3) * 0.48;
+    v.x *= n; v.z *= n;
+    if (v.y > 0.5) v.y = 0.5 + (v.y - 0.5) * 0.15;   // flat-ish top
+    // a boulder rising out of the water: rounded shoulders, then flaring out wide toward the bed
+    var flare = v.y > 0 ? 1 - Math.pow(v.y / 0.55, 2) * 0.38 : 1 + Math.pow(-v.y, 1.4) * 0.9;   // rounded shoulders, wide base
+    p.setXYZ(i, v.x * flare, v.y, v.z * flare);
+  }
+  var maxY = -9, minY = 9; for (var j = 0; j < p.count; j++) { maxY = Math.max(maxY, p.getY(j)); minY = Math.min(minY, p.getY(j)); }
+  var sy = h / (maxY - minY);
+  for (var k = 0; k < p.count; k++) p.setXYZ(k, p.getX(k) * r * 1.08, (p.getY(k) - minY) * sy - h / 2, p.getZ(k) * r * 1.08);
+  g.computeVertexNormals();
+  return g;
 };
 
 // Stepping stones from A to B (A/B are edge points). Spacing grows with difficulty.
 LV.stones = function(c, ax, az, ay, bx, bz, by, d, opts) {
   opts = opts || {};
-  var len = Math.hypot(bx - ax, bz - az);
+  var len = opts.len || Math.hypot(bx - ax, bz - az);
+  // opts.at(f) → {x, z, dx, dz}: lay the stones along a curved path instead of a straight line
+  var at = opts.at || function(f) { return { x: ax + (bx - ax) * f, z: az + (bz - az) * f, dx: (bx - ax) / len, dz: (bz - az) / len }; };
   var maxGap = 1.9 + d * 0.9;                          // edge-to-edge jump distance
   var r = 1.15 - d * 0.3;
   var n = Math.max(1, Math.ceil((len - maxGap) / (maxGap + 2 * r)));
   var mat = opts.mat || CM.get("rock", opts.color || 0x8a8580);
   var out = [];
   for (var i = 1; i <= n; i++) {
-    var t = i / (n + 1), jitter = (srng() - 0.5) * 0.9;
-    var x = ax + (bx - ax) * t + (bz - az) / len * jitter, z = az + (bz - az) * t - (bx - ax) / len * jitter;
+    var t = i / (n + 1), jitter = (srng() - 0.5) * 0.9, q = at(t);
+    var x = q.x + q.dz * jitter, z = q.z - q.dx * jitter;
     var top = ay + (by - ay) * t - 0.25 + (srng() - 0.5) * 0.3;
     var s = c.cyl({ x: x, z: z, r: r * (0.85 + srng() * 0.3), top: top, bottom: (opts.bottom !== undefined ? opts.bottom : c.hazard.level - 3), mat: mat, kind: "platform", surf: "rock", segments: 9, topScale: 0.92, crumble: !!opts.crumble });
-    if (s.mesh) { s.mesh.rotation.y = srng() * 3; }
+    if (s.mesh) { var h0 = top - s.bottom; s.mesh.geometry.dispose(); s.mesh.geometry = LV.rockGeo(s.r, h0, Math.floor(srng() * 1e6)); s.mesh.rotation.set((srng() - 0.5) * 0.08, srng() * 3, (srng() - 0.5) * 0.08); }
+    s.crossing = true;
     if (opts.bob && srng() < 0.6) c.addMover(s, { type: "bob", amp: 0.35 + d * 0.3, speed: 1.1 + srng(), phase: srng() * 6 });
     out.push(s);
   }
@@ -202,22 +277,34 @@ LV.islands = function(c, hole, idx, d, spawns) {
   var foam = [];
   var restless = hole.mods.indexOf("restless") >= 0, crumble = hole.mods.indexOf("crumble") >= 0;
   chain.forEach(function(isl, i) {
-    var r = Math.max(3.4, isl.r), surf = W + ISLAND_TOP + (isl.elev || 0);
+    var end = i === 0 || i === chain.length - 1;
+    var r = Math.max(3.4, isl.r) * (end ? 1 : 0.9 + srng() * 0.35), surf = W + ISLAND_TOP + (isl.elev || 0);
+    // every island its own silhouette: lobed / bean / blob, domed meadows or sandy beaches (tee & basket stay calm and flat)
+    var sh = GFX.islandShape((idx + 1) * 977 + i * 131, end);
+    if (lava || hole.theme === "eerie" || hole.theme === "tornado") sh.beach = false;
     var avoid = i === 0 ? [{ x: 0, z: 0, r: 2.5 }] : i === chain.length - 1 ? [{ x: isl.x, z: isl.z, r: 0.8 }] : [];
-    var vis = GFX.buildIsland({ x: isl.x, z: isl.z, r: r, surfY: surf, waterY: W, theme: hole.theme, type: i === 0 ? "tee" : i === chain.length - 1 ? "basket" : "normal", avoid: avoid, seed: (idx + 1) * 977 + i * 131 });
+    // keep the decor out of the way of the bridges to the neighbouring islands
+    var clear = [];
+    [chain[i - 1], chain[i + 1]].forEach(function(nb) { if (nb) clear.push(Math.atan2(nb.z - isl.z, nb.x - isl.x)); });
+    var vis = GFX.buildIsland({ x: isl.x, z: isl.z, r: r, surfY: surf, waterY: W, theme: hole.theme, type: i === 0 ? "tee" : i === chain.length - 1 ? "basket" : "normal", avoid: avoid, seed: (idx + 1) * 977 + i * 131,
+      prof: sh.prof, dome: sh.dome, beach: sh.beach, tint: sh.tint, clear: clear });
     c.group.add(vis);
     if (vis.userData.waterlineR > 0) foam.push({ x: isl.x, z: isl.z, r: vis.userData.waterlineR });
-    c.addSolid({ shape: "cyl", x: isl.x, z: isl.z, r: r, top: surf, bottom: W - 4, taper: 0.5, kind: "ground" });
-    isl.surf = surf; isl.R = r;
-    // Critters and props live on the fairway islands
-    if (i > 0 && i < chain.length - 1) spawns.push({ kind: "island", x: isl.x, z: isl.z, r: r, y: surf });
+    var drop = surf - W;
+    c.addSolid({ shape: "cyl", x: isl.x, z: isl.z, r: r, top: surf, bottom: W - 4, kind: "ground", prof: sh.prof, profMax: sh.max, dome: sh.dome,
+      taper: sh.beach ? 4.6 : 0.5, slope: sh.beach ? (drop + 0.6) / 4.6 : 2.0 });
+    isl.surf = surf; isl.R = r; isl.prof = sh.prof;
+    // Critters and props live on the fairway islands (well inside the shaped edge)
+    if (i > 0 && i < chain.length - 1) spawns.push({ kind: "island", x: isl.x, z: isl.z, r: r * 0.78, y: surf });
   });
   hole._foamStatic = foam;
   // Links: bridges early, stepping stones later (bobbing / crumbling with mods)
   for (var k = 1; k < chain.length; k++) {
     var A = chain[k - 1], B = chain[k], dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L;
-    var ax = A.x + ux * (A.R - 0.2), az = A.z + uz * (A.R - 0.2), bx = B.x - ux * (B.R - 0.2), bz = B.z - uz * (B.R - 0.2);
-    var gap = L - A.R - B.R;
+    // the real (shaped) edge of each island facing the other one; bridges land a little way onto it
+    var RA = A.R * GFX.profAt(A.prof, Math.atan2(uz, ux)), RB = B.R * GFX.profAt(B.prof, Math.atan2(-uz, -ux));
+    var ax = A.x + ux * (RA - 0.7), az = A.z + uz * (RA - 0.7), bx = B.x - ux * (RB - 0.7), bz = B.z - uz * (RB - 0.7);
+    var gap = L - RA - RB;
     if (gap < 1.2) continue;
     if (d < 0.18 || (idx % 3 === 0 && k === 1)) LV.bridge(c, ax, az, A.surf, bx, bz, B.surf, 2.2);
     else LV.stones(c, ax + ux * 0.6, az + uz * 0.6, A.surf, bx - ux * 0.6, bz - uz * 0.6, B.surf, d, { bob: restless || d > 0.6, crumble: crumble, color: lava ? 0x3a2a26 : undefined });
@@ -260,7 +347,7 @@ LV.highlands = function(c, hole, idx, d, spawns) {
   var fw = cfg.fw - d * 3;
   var rivers = cfg.rivers.map(function(rt) {
     var p = LV.pointAt(pts, rt);
-    return { x: p.x, z: p.z, nx: p.dx, nz: p.dz, w: (cfg.riverW || 3.5) + d * 2.5 };   // river runs perpendicular to the route
+    return { x: p.x, z: p.z, nx: p.dx, nz: p.dz, w: (cfg.riverW || 3.5) + d * 2.5, t: rt };   // river runs perpendicular to the route
   });
   var seedOx = srng() * 100, seedOz = srng() * 100;
   // Cascades: a stream runs down the valley beside the fairway and pours over each terrace
@@ -303,18 +390,42 @@ LV.highlands = function(c, hole, idx, d, spawns) {
   LV.terrainMesh(c, hole, cfg, minX, maxX, minZ, maxZ, 1.0);
 
   // River crossings: bridge early, stones later
-  rivers.forEach(function(R) {
-    // The river sits in a valley: walk out from the water until each bank is above the
-    // highest tide, so the crossing starts and ends on dry ground with a level deck
-    var deck = W + (c.tideMax || 0) + 0.9;
-    var bank = function(sgn) {
-      for (var dd = R.w + 1; dd < R.w + 45; dd += 0.25) { var x = R.x + R.nx * dd * sgn, z = R.z + R.nz * dd * sgn; if (c.heightAt(x, z) >= deck) return { x: x, z: z }; }
-      return { x: R.x + R.nx * (R.w + 45) * sgn, z: R.z + R.nz * (R.w + 45) * sgn };
-    };
-    var A = bank(-1), Bk = bank(1), ax = A.x, az = A.z, bx = Bk.x, bz = Bk.z;
-    var ay = Math.max(deck, c.heightAt(ax, az)), by = Math.max(deck, c.heightAt(bx, bz));
-    if (d < 0.25) LV.bridge(c, ax, az, ay, bx, bz, by, 2.4);
-    else LV.stones(c, ax, az, ay, bx, bz, by, d, { bob: hole.mods.indexOf("restless") >= 0, bottom: W - 3 });
+  // Crossings follow the fairway: from each river walk back and forward along the route
+  // to the first dry ground above the highest tide. Rivers whose water merges (the canyon)
+  // share one crossing, so every bridge starts and ends on a bank you can walk to.
+  var deck = W + (c.tideMax || 0) + 0.9, Lr = LV._polyLen(pts), dt = 0.3 / Lr, spans = [];
+  rivers.slice().sort(function(a, b) { return a.t - b.t; }).forEach(function(R) {
+    if (spans.some(function(sp) { return R.t >= sp.t0 && R.t <= sp.t1; })) return;   // already crossed
+    var dry = function(t) { var q = LV.pointAt(pts, t); return c.heightAt(q.x, q.z) >= deck; };
+    var t0 = R.t, t1 = R.t;
+    while (t0 > 0.02 && !dry(t0)) t0 -= dt;
+    while (t1 < 0.98 && !dry(t1)) t1 += dt;
+    spans.push({ t0: t0, t1: t1 });
+  });
+  // Route corners (as t) — crossings break there so every section lies exactly on the fairway
+  var cornerT = [], accL = 0;
+  for (var ci = 1; ci < pts.length - 1; ci++) { accL += Math.hypot(pts[ci].x - pts[ci - 1].x, pts[ci].z - pts[ci - 1].z); cornerT.push(accL / Lr); }
+  spans.forEach(function(sp) {
+    var ts = [sp.t0];
+    cornerT.forEach(function(ct) { if (ct > sp.t0 + 0.5 / Lr && ct < sp.t1 - 0.5 / Lr) ts.push(ct); });
+    ts.push(sp.t1);
+    if (d < 0.25) {
+      for (var k = 0; k < ts.length - 1; k++) {
+        // long straight runs are split too, so the decks stay short and sturdy-looking
+        var segL = (ts[k + 1] - ts[k]) * Lr, m = Math.max(1, Math.ceil(segL / 16));
+        for (var j = 0; j < m; j++) {
+          var A = LV.pointAt(pts, ts[k] + (ts[k + 1] - ts[k]) * j / m), B = LV.pointAt(pts, ts[k] + (ts[k + 1] - ts[k]) * (j + 1) / m);
+          var ux = B.x - A.x, uz = B.z - A.z, ul = Math.hypot(ux, uz) || 1, first = k === 0 && j === 0, last = k === ts.length - 2 && j === m - 1;
+          // sections overlap a little at the joints so there's no gap at a bend
+          var e0 = first ? 0 : 0.9, e1 = last ? 0 : 0.9;
+          LV.bridge(c, A.x - ux / ul * e0, A.z - uz / ul * e0, deck, B.x + ux / ul * e1, B.z + uz / ul * e1, deck, 2.4, { sag: (ts.length > 2 || m > 1) ? 0 : undefined });
+        }
+      }
+    } else {
+      var spanL = (sp.t1 - sp.t0) * Lr, A2 = LV.pointAt(pts, sp.t0), B2 = LV.pointAt(pts, sp.t1);
+      LV.stones(c, A2.x, A2.z, deck, B2.x, B2.z, deck, d, { bob: hole.mods.indexOf("restless") >= 0, bottom: W - 3, len: spanL,
+        at: function(f) { return LV.pointAt(pts, sp.t0 + (sp.t1 - sp.t0) * f); } });
+    }
   });
   // Waterfalls pouring off the terrace cliffs beside the fairway
   if (stream) LV.cascade(c, stream);
@@ -328,7 +439,91 @@ LV.highlands = function(c, hole, idx, d, spawns) {
   c.basket = { x: tb.x, y: c.heightAt(tb.x, tb.z), z: tb.z };
   // Flatten-check: keep the basket off a ledge by nudging along the route if needed
   spawns.push({ kind: "fairway", pts: pts, fw: fw });
+  LV.dressMeadow(c, hole, pts, fw, rivers);
   c.backdrop = true;
+};
+
+// ── Set dressing along the fairway: no more empty lawns ──────────────────────
+// Bushes, small trees, fences, hay bales, flower drifts, mushrooms, rocks — chosen per
+// world, scattered in clumps beside the fairway (never on it), merged into one swaying mesh.
+LV.dressMeadow = function(c, hole, pts, fw, rivers) {
+  var th = hole.theme, rnd = _gfxRng(((hole.n || 1) * 6151 + 3) >>> 0), W = c.hazard.level;
+  var kit = {
+    village:      { bush: 3, tree: 2, fence: 1.2, hay: 1, flowers: 2, rock: 1 },
+    vetschool:    { bush: 3, tree: 2, flowers: 3, rock: 0.5, hedge: 1 },
+    cabbage:      { bush: 2, tree: 1, hay: 1.5, fence: 1, cabbage: 3, rock: 1 },
+    feet_bunnies: { bush: 2, tree: 1.5, flowers: 5, mushroom: 2, rock: 0.5 },
+    socks_basket: { bush: 2, tree: 1.5, flowers: 3, hedge: 1.5, rock: 0.5 },
+    mountains:    { pine: 3, rock: 3, bush: 1, flowers: 1 },
+    winter:       { snowpine: 3, rock: 2 },
+    grandcanyon:  { shrub: 3, rock: 3 },
+    waterfall:    { bush: 3, tree: 1.5, rock: 2, flowers: 2, fern: 2 },
+  }[th];
+  if (!kit) return;
+  var kinds = Object.keys(kit), tot = kinds.reduce(function(a, k) { return a + kit[k]; }, 0);
+  var parts = [], col = function(g, hex, v) { var cc = new THREE.Color(hex).multiplyScalar(v || 1), n = g.attributes.position.count, a = new Float32Array(n * 3); for (var i = 0; i < n; i++) { a[i * 3] = cc.r; a[i * 3 + 1] = cc.g; a[i * 3 + 2] = cc.b; } g.setAttribute("color", new THREE.BufferAttribute(a, 3)); return g; };
+  var ground = 0;   // ground height of the item being placed (sway bends by height above it)
+  var put = function(g, hex, x, y, z, v) {
+    g = g.index ? g.toNonIndexed() : g;
+    g.translate(x, y, z);
+    var pa = g.attributes.position, sw = new Float32Array(pa.count); for (var i = 0; i < pa.count; i++) sw[i] = Math.max(0, pa.getY(i) - ground);
+    g.setAttribute("aSway", new THREE.BufferAttribute(sw, 1));
+    parts.push(col(g, hex, v || (0.85 + rnd() * 0.3)));
+  };
+  var leaf = { village: 0x3f7a2a, vetschool: 0x3a7a34, cabbage: 0x4a7a26, feet_bunnies: 0x4a9a3a, socks_basket: 0x4a9040, mountains: 0x3a6a2a, waterfall: 0x2f7a2a }[th] || 0x3f7a2a;
+  var flowerCols = th === "feet_bunnies" ? [0xff7ab8, 0xffb0d8, 0xffffff, 0xd88aff] : [0xffd23a, 0xff5a5a, 0xffffff, 0xb46aff, 0xff9a3a];
+  var L = LV._polyLen(pts), n = Math.round(L * 1.9);
+  var free = function(x, z) {
+    var pd = LV.polyDist(pts, x, z); if (pd.d < fw + 2.5) return false;
+    var g = c.heightAt(x, z); if (!(g > W + 0.4) || (c.supportAt(x, z).solid)) return false;
+    if (Math.abs(c.heightAt(x + 1, z) - g) + Math.abs(c.heightAt(x, z + 1) - g) > 1.2) return false;   // not on steep slopes
+    if (Math.hypot(x - c.tee.x, z - c.tee.z) < 7 || Math.hypot(x - pts[pts.length - 1].x, z - pts[pts.length - 1].z) < 6) return false;
+    return true;
+  };
+  for (var i = 0; i < n; i++) {
+    var p = LV.pointAt(pts, rnd()), side = rnd() < 0.5 ? -1 : 1, off = fw + 3 + Math.pow(rnd(), 1.6) * 26;
+    var cx = p.x - p.dz * off * side, cz = p.z + p.dx * off * side;
+    var r = rnd() * tot, kind = kinds[0]; for (var q = 0; q < kinds.length; q++) { r -= kit[kinds[q]]; if (r <= 0) { kind = kinds[q]; break; } }
+    var clump = kind === "fence" || kind === "hedge" ? 1 : 1 + Math.floor(rnd() * 3);
+    for (var k = 0; k < clump; k++) {
+      var x = cx + (rnd() - 0.5) * 3, z = cz + (rnd() - 0.5) * 3;
+      if (!free(x, z)) continue;
+      var y = c.heightAt(x, z) - 0.05, s = 0.8 + rnd() * 0.5, yaw = rnd() * 6.28, g; ground = y;
+      switch (kind) {
+        case "bush": for (var b = 0; b < 3; b++) { g = new THREE.IcosahedronGeometry(0.45 * s * (0.7 + rnd() * 0.5), 0); g.scale(1, 0.8, 1); put(g, leaf, x + (rnd() - 0.5) * 0.7 * s, y + 0.35 * s, z + (rnd() - 0.5) * 0.7 * s); } break;
+        case "tree": g = new THREE.CylinderGeometry(0.12 * s, 0.17 * s, 1.6 * s, 6); put(g, 0x5a3e26, x, y + 0.8 * s, z);
+          for (var t2 = 0; t2 < 3; t2++) { g = new THREE.IcosahedronGeometry(0.9 * s * (0.7 + rnd() * 0.4), 0); put(g, leaf, x + (rnd() - 0.5) * 0.8 * s, y + (1.9 + rnd() * 0.6) * s, z + (rnd() - 0.5) * 0.8 * s); } break;
+        case "pine": case "snowpine": g = new THREE.CylinderGeometry(0.1 * s, 0.14 * s, 1 * s, 6); put(g, 0x5a3a22, x, y + 0.5 * s, z);
+          [[1.1, 1.8, 1.4], [0.8, 1.5, 2.3], [0.5, 1.1, 3.0]].forEach(function(cn, ci) { var gg = new THREE.ConeGeometry(cn[0] * s, cn[1] * s, 7); put(gg, kind === "snowpine" && ci === 2 ? 0xeef4fa : 0x2f5a2a, x, y + cn[2] * s, z); }); break;
+        case "rock": g = new THREE.DodecahedronGeometry(0.35 * s + rnd() * 0.4, 0); g.scale(1, 0.55 + rnd() * 0.3, 1); g.rotateY(yaw); put(g, th === "grandcanyon" ? 0xa8643a : th === "winter" ? 0x8a94a0 : 0x8a8478, x, y + 0.12, z); break;
+        case "flowers": for (var f = 0; f < 7; f++) { g = new THREE.IcosahedronGeometry(0.07 + rnd() * 0.05, 0); put(g, flowerCols[Math.floor(rnd() * flowerCols.length)], x + (rnd() - 0.5) * 1.6, y + 0.2 + rnd() * 0.1, z + (rnd() - 0.5) * 1.6, 1); g = new THREE.CylinderGeometry(0.01, 0.01, 0.22, 3); put(g, 0x4a8a2a, x + (rnd() - 0.5) * 1.6, y + 0.1, z + (rnd() - 0.5) * 1.6); } break;
+        case "mushroom": g = new THREE.CylinderGeometry(0.06, 0.08, 0.3, 6); put(g, 0xf4ece0, x, y + 0.15, z); g = new THREE.SphereGeometry(0.2, 8, 5, 0, 6.283, 0, 1.6); put(g, rnd() < 0.5 ? 0xd8302a : 0xc8a070, x, y + 0.28, z, 1); break;
+        case "hay": g = new THREE.CylinderGeometry(0.55, 0.55, 1.1, 12); g.rotateZ(Math.PI / 2); g.rotateY(yaw); put(g, 0xd8b85a, x, y + 0.55, z); break;
+        case "cabbage": for (var cb = 0; cb < 6; cb++) { g = new THREE.IcosahedronGeometry(0.28, 1); g.scale(1, 0.75, 1); var cx2 = x + Math.cos(yaw) * cb * 0.9, cz2 = z + Math.sin(yaw) * cb * 0.9; if (free(cx2, cz2)) put(g, 0x6aa83a, cx2, c.heightAt(cx2, cz2) + 0.15, cz2); } break;
+        case "fence": case "hedge":
+          var segs = 3 + Math.floor(rnd() * 4), fx = Math.cos(yaw), fz = Math.sin(yaw);
+          for (var sI = 0; sI <= segs; sI++) {
+            var px = x + fx * sI * 1.6, pz = z + fz * sI * 1.6; if (!free(px, pz)) break;
+            var py = c.heightAt(px, pz);
+            if (kind === "hedge") { g = new THREE.BoxGeometry(1.7, 0.9, 0.7); g.rotateY(-yaw); put(g, leaf, px, py + 0.45, pz, 0.85); }
+            else { g = new THREE.BoxGeometry(0.12, 1.0, 0.12); put(g, 0x8a6a42, px, py + 0.5, pz); if (sI < segs) [0.35, 0.75].forEach(function(hh) { var rail = new THREE.BoxGeometry(1.6, 0.08, 0.05); rail.rotateY(-yaw); put(rail, 0x9a7a52, px + fx * 0.8, py + hh, pz + fz * 0.8); }); }
+          } break;
+        case "shrub": for (var sh2 = 0; sh2 < 5; sh2++) { g = new THREE.ConeGeometry(0.04, 0.5 + rnd() * 0.4, 3); g.rotateZ((rnd() - 0.5) * 0.9); g.rotateX((rnd() - 0.5) * 0.9); put(g, 0x8a7a4a, x, y + 0.25, z); } break;
+        case "fern": for (var fe = 0; fe < 6; fe++) { g = new THREE.ConeGeometry(0.12, 0.9, 3); g.rotateZ(1.0); g.translate(0.4, 0, 0); g.rotateY(fe * 1.05 + rnd() * 0.3); put(g, 0x3a8a2a, x, y + 0.25, z); } break;
+      }
+    }
+  }
+  if (!parts.length) return;
+  var mat = GFX._matCache.meadow || (GFX._matCache.meadow = GFX.addSway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true }), 0.12, 4, true));
+  mat.userData.shared = true;
+  // one mesh per ~4000 parts keeps merges quick; world-space vertices: sway by height above sea level is fine here
+  for (var o = 0; o < parts.length; o += 4000) {
+    var chunk = parts.slice(o, o + 4000), merged = GFX.mergeGeometries(chunk), sw = new Float32Array(merged.attributes.position.count), off2 = 0;
+    chunk.forEach(function(g) { sw.set(g.attributes.aSway.array, off2); off2 += g.attributes.position.count; });
+    merged.setAttribute("aSway", new THREE.BufferAttribute(sw, 1));
+    var m = new THREE.Mesh(merged, mat);
+    m.castShadow = true; m.receiveShadow = true; m.userData.noBatch = true; c.group.add(m);
+  }
 };
 
 // Heightfield mesh, coloured by height, slope and theme

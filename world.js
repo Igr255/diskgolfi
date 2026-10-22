@@ -357,7 +357,9 @@ WORLD.forest = function(ctx) {
   }
   types.forEach(function(t, ti) {
     var L = lists[ti]; if (!L.length) return;
-    var mesh = new THREE.InstancedMesh(WORLD.treeGeometry(t[0]), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true }), L.length);
+    var tmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+    if (t[0] !== "rock" && t[0] !== "block") GFX.addSway(tmat, t[0] === "palm" ? 0.35 : 0.22, t[0] === "palm" ? 7 : 8);
+    var mesh = new THREE.InstancedMesh(WORLD.treeGeometry(t[0]), tmat, L.length);
     var col = new THREE.Color();
     L.forEach(function(mm, k) { mesh.setMatrixAt(k, mm); var v = 0.82 + rnd() * 0.3; col.setRGB(v, v * (0.95 + rnd() * 0.1), v * 0.92); mesh.setColorAt(k, col); });
     mesh.instanceMatrix.needsUpdate = true; mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.userData.noBatch = true;

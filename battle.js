@@ -172,7 +172,7 @@ BT.knockMe = function(by, cause, dx, dz, force, up) {
   _spawnBonkText(PL.pos.clone().add(new THREE.Vector3(0, 2.4, 0)), _KO_WORDS[cause] || "KO!");
   AudioEngine.sfx(freeze ? "splash" : "bonk");
   _screenShake = 0.55; _screenShakeT = 0.5;
-  BT.koFlash();
+  BT.koFlash(); CAMFX.kick(-7);
   if (mpMode) sendToAll({ t: "ko", v: myIdx, by: by, c: cause });
   BT.onKO(myIdx, by, cause);
 };
