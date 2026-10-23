@@ -64,6 +64,7 @@ function _buildAudioGraph(ctx) {
   G.music = G.musicLP;                                   // songs connect here
   G.ambVol = ctx.createGain(); G.ambVol.connect(G.master); G.amb = G.ambVol;
   G.sfxVol = ctx.createGain(); G.sfxVol.connect(G.master); G.sfx = G.sfxVol;
+  G.uiVol = ctx.createGain(); G.uiVol.connect(G.master);
 
   // Reverb (music + effects get their own return so each follows its volume)
   var ir = _makeIR(ctx, 3.2, 2.6);
@@ -414,13 +415,14 @@ var _STYLES = {
   // Storms & lava — darker minor, still calm
   storm:    { bpm: 74, swing: 0, root: 38, keys: [0, 3, 5], mode: "minor", progs: [[0,5,3,4],[0,6,5,6],[0,3,6,4]], lead: "bell", comp: "ep", drums: "pulse", arr: "ambient", bells: "bell", pad: 700, gain: 1.1 },
   // Menu theme — fixed seed so the game always opens with the same tune
+  jungle:   { bpm: 108, swing: .12, root: 43, keys: [0, 5, 7], mode: "dorian", progs: [[0,3,4,3],[0,6,5,4],[0,3,6,5]], lead: "marimba", comp: "ep", drums: "light", arr: "groove", bells: "bell", pad: 900, bassPat: "bounce", gain: 0.85 },
   menu:     { bpm: 80, swing: .16, root: 41, keys: [0], mode: "major", progs: [[0,2,3,4]], lead: "kalimba", comp: "ep", drums: "lofi", arr: "groove", bells: "bell", pad: 950, gain: 1.0 },
 };
 
 var _THEME_STYLE = {
   funny: "playful", feet_bunnies: "meadow", socks_basket: "playful", public_poo: "playful", emote: "playful", minion: "playful",
   village: "meadow", vetschool: "meadow", cabbage: "meadow",
-  waterfall: "island", skyblock: "blocks", minecraft: "blocks",
+  waterfall: "island", skyblock: "blocks", minecraft: "blocks", bouncy: "playful", jungle: "jungle",
   mountains: "alpine", grandcanyon: "alpine", winter: "winter", moon: "space",
   eerie: "dusk", hogwarts: "waltz", backrooms: "liminal", poolrooms: "liminal",
   neon: "synth", city: "synth", geometry_dash: "synth", sixtyseven: "synth", map67: "synth",
@@ -433,7 +435,7 @@ var _THEME_AMB = {
   eerie: ["ocean", "crickets"], hogwarts: ["ocean", "crickets"], public_poo: ["ocean", "crickets"],
   neon: ["ocean"], geometry_dash: ["ocean"], sixtyseven: ["ocean"], map67: ["ocean"], disco: ["ocean"],
   city: ["ocean", "traffic"], office: ["hum"], backrooms: ["hum"], poolrooms: ["drips"],
-  moon: ["space"], skyblock: ["wind", "birds"],
+  moon: ["space"], skyblock: ["wind", "birds"], bouncy: ["wind", "birds"], jungle: ["birds", "crickets"],
   terrifying: ["lava"], screaming_mamamia: ["lava"], tornado: ["ocean", "wind"],
   winter: ["ocean", "wind"], mountains: ["ocean", "wind", "birds"], grandcanyon: ["ocean", "wind"],
 };
@@ -447,7 +449,7 @@ function _Song(G, styleName, seed, startTime, opts) {
   var rng = _aRng(seed);
   this.G = G; this.ctx = ctx; this.st = st; this.rng = rng; this.name = styleName;
   this.bpm = st.bpm * (0.97 + rng() * 0.06);
-  this.spb = 60 / this.bpm;
+  this.spb = 60 / this.bpm; this.spb0 = this.spb; this.tempoMul = 1; this.tempoTgt = 1;
   this.meter = st.meter || 4;
   this.root = st.root + _pick(rng, st.keys || [0]);
   this.scale = _MODES[st.mode] || _MODES.major;
@@ -560,10 +562,29 @@ _Song.prototype.phrase = function(key) {
 
 // Schedule every bar whose start falls before tEnd
 _Song.prototype.scheduleUntil = function(tEnd) {
-  while (this.nextBar < tEnd) { this.scheduleBar(this.bar, this.nextBar); this.bar++; this.nextBar += this.meter * this.spb; }
+  while (this.nextBar < tEnd) { this._tempoStep(this.nextBar); this.scheduleBar(this.bar, this.nextBar); this.bar++; this.nextBar += this.meter * this.spb; }
 };
+// Adaptive tempo: ease toward tempoTgt on bar lines, keeping the beat clock continuous
+_Song.prototype._tempoStep = function(tb) {
+  var tgt = this.tempoTgt || 1, cur = this.tempoMul || 1;
+  if (Math.abs(tgt - cur) < 0.004) return;
+  var nm = cur + Math.max(-0.04, Math.min(0.04, tgt - cur));
+  this.beat0 = this.beatAt(tb); this.tb0 = tb;
+  this.tempoMul = nm; this.spb = this.spb0 / nm;
+  var G = this.G, d = this.spb * 0.75; G.delayL.delayTime.setTargetAtTime(d, tb, 0.2); G.delayR.delayTime.setTargetAtTime(d, tb, 0.2);
+};
+_Song.prototype.beatAt = function(t) { return (this.beat0 || 0) + (t - (this.tb0 === undefined ? this.t0 : this.tb0)) / this.spb; };
 
+_Song.prototype._tension = function(t0) {
+  if (!(this.intensity > 0.5) || !this.ch.drums) return;
+  var s16 = this.spb / 4, self = this;
+  for (var i = 0; i < this.meter * 4; i++) {
+    _INS.shaker(self.ch.drums, t0 + i * s16, i % 4 === 0 ? 0.9 : 0.5);
+    if (i % 4 === 2) _INS.hat(self.ch.drums, t0 + i * s16, 0.5, true);
+  }
+};
 _Song.prototype.scheduleBar = function(bar, t0) {
+  this._tension(t0);
   if (this.st.house) return this._houseBar(bar, t0);
   var st = this.st, spb = this.spb, meter = this.meter, rng = this.rng, self = this;
   var sec = this.section(bar), secIdx = Math.floor(bar / 8) + (this.skipIntro ? 1 : 0);
@@ -1014,6 +1035,7 @@ var _SFX = {
   },
   click: function(G, t) { this._tone(G, t, "sine", 1250, 950, 0.035, 0.05); this._noise(G, t, 0.015, "highpass", 5000, 0.7, 0.015); },
   // ── Character foley ──
+  click: function(G, t) { this._tone(G, t, "sine", 1400, 900, 0.05, 0.05); this._noise(G, t, 0.02, "highpass", 4000, 0.7, 0.02); },
   step: function(G, t, k) {   // k encodes the surface: 0.2 soft (grass/carpet) … 1 hard (stone/metal)
     var f = 700 + k * 1800 + Math.random() * 300;
     this._noise(G, t, 0.05 + (1 - k) * 0.04, "bandpass", f, 1.1, 0.035 + k * 0.03);
@@ -1032,7 +1054,142 @@ var _SFX = {
   powerup: function(G, t) {
     [72, 76, 79, 84, 88].forEach(function(m, i) { _SFX._tone(G, t + i * 0.055, "sine", _mtof(m), _mtof(m), 0.5, 0.07, 0.6); _SFX._tone(G, t + i * 0.055, "sine", _mtof(m) * 3.5, _mtof(m) * 3.5, 0.18, 0.015, 0.6); });
   },
+  // ── Arcade slapstick ──
+  _vib: function(G, o, t, dur, rate, depth) { var l = G.ctx.createOscillator(), g = G.ctx.createGain(); l.frequency.value = rate; g.gain.value = depth; l.connect(g); g.connect(o.frequency); l.start(t); l.stop(t + dur + 0.05); },
+  rocket: function(G, t, k) {   // ignition crack, roaring burn, rising whine
+    this._noise(G, t, 0.1, "lowpass", 1400, 0.7, 0.35 * k);
+    var fl = this._noise(G, t, 0.95, "bandpass", 260, 0.7, 0.32 * k, 0.15); fl.frequency.exponentialRampToValueAtTime(2600, t + 0.75);
+    var o = this._tone(G, t, "sawtooth", 150, 980, 0.85, 0.035 * k, 0.1); this._vib(G, o, t, 0.85, 31, 18);
+  },
+  whistleDown: function(G, t, k) {   // the cartoon "something's falling" whistle
+    var o = this._tone(G, t, "sine", 2300, 520, 0.55, 0.06 * k, 0.25, 0.03); this._vib(G, o, t, 0.55, 9, 40);
+  },
+  slam: function(G, t, k) {   // anvil hits the dirt: thud + clang + rubble
+    this._tone(G, t, "sine", 95, 30, 0.7, 0.55 * k, 0.3);
+    this._metal(G, t, 310, 0.18 * k, 1.4);
+    var fl = this._noise(G, t, 0.8, "lowpass", 2200, 0.6, 0.35 * k, 0.3); fl.frequency.exponentialRampToValueAtTime(160, t + 0.7);
+    for (var i = 0; i < 7; i++) this._noise(G, t + 0.06 + Math.random() * 0.4, 0.04, "bandpass", 1200 + Math.random() * 1800, 2, 0.06 * k);
+  },
+  kaboom: function(G, t, k) {   // barrel: deep blast, long rumble, crackle
+    this._tone(G, t, "sine", 78, 26, 1.3, 0.62 * k, 0.4);
+    this._tone(G, t, "triangle", 160, 40, 0.35, 0.25 * k);
+    var fl = this._noise(G, t, 1.6, "lowpass", 3200, 0.6, 0.5 * k, 0.45); fl.frequency.exponentialRampToValueAtTime(110, t + 1.5);
+    for (var i = 0; i < 12; i++) this._noise(G, t + 0.05 + Math.pow(Math.random(), 1.5) * 0.9, 0.03, "highpass", 2500, 0.7, 0.05 * k);
+  },
+  goose: function(G, t, k) {   // HONK: a nasal reed through two formants, pitch sagging
+    var ctx = G.ctx, n = Math.random() < 0.4 ? 2 : 1;
+    for (var h = 0; h < n; h++) {
+      var t0 = t + h * 0.24, f0 = 430 + Math.random() * 60, o = ctx.createOscillator(), o2 = ctx.createOscillator(); o.type = "sawtooth"; o2.type = "square";
+      o.frequency.setValueAtTime(f0, t0); o.frequency.linearRampToValueAtTime(f0 * 1.06, t0 + 0.05); o.frequency.exponentialRampToValueAtTime(f0 * 0.78, t0 + 0.24);
+      o2.frequency.setValueAtTime(f0 * 0.5, t0); o2.frequency.exponentialRampToValueAtTime(f0 * 0.39, t0 + 0.24);
+      var mix = ctx.createGain(); mix.gain.value = 1; o.connect(mix); var g2 = ctx.createGain(); g2.gain.value = 0.4; o2.connect(g2); g2.connect(mix);
+      var out = ctx.createGain(); out.gain.setValueAtTime(0, t0); out.gain.linearRampToValueAtTime(0.16 * k, t0 + 0.02); out.gain.setValueAtTime(0.16 * k, t0 + 0.17); out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.26);
+      [[1150, 5, 1], [2500, 7, 0.6], [600, 3, 0.5]].forEach(function(F) { var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = F[0]; bp.Q.value = F[1]; var fg = ctx.createGain(); fg.gain.value = F[2]; mix.connect(bp); bp.connect(fg); fg.connect(out); });
+      out.connect(G.sfx); var v = ctx.createGain(); v.gain.value = 0.2; out.connect(v); v.connect(G.sfxVerb);
+      o.start(t0); o2.start(t0); o.stop(t0 + 0.3); o2.stop(t0 + 0.3);
+    }
+  },
+  splat: function(G, t, k) {   // gecko suction cups: wet squelch
+    var fl = this._noise(G, t, 0.2, "bandpass", 1100, 3, 0.22 * k); fl.frequency.exponentialRampToValueAtTime(260, t + 0.18);
+    this._tone(G, t, "sine", 360, 70, 0.16, 0.12 * k);
+    this._tone(G, t + 0.07, "sine", 900, 1500, 0.05, 0.03 * k);
+  },
+  whoosh: function(G, t, k) {   // updraft
+    var fl = this._noise(G, t, 0.8, "bandpass", 380, 1.1, 0.2 * k, 0.2); fl.frequency.exponentialRampToValueAtTime(1900, t + 0.35); fl.frequency.exponentialRampToValueAtTime(500, t + 0.78);
+  },
+  roar: function(G, t, k) {   // dinosaur: a raspy growl that swells and falls
+    var ctx = G.ctx, o = ctx.createOscillator(); o.type = "sawtooth";
+    o.frequency.setValueAtTime(95, t); o.frequency.linearRampToValueAtTime(130, t + 0.25); o.frequency.exponentialRampToValueAtTime(48, t + 1.3);
+    var rasp = ctx.createOscillator(), rg = ctx.createGain(); rasp.frequency.value = 31; rg.gain.value = 0.5; rasp.connect(rg);
+    var amp = ctx.createGain(); amp.gain.value = 0.5; rg.connect(amp.gain);
+    var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 520; bp.Q.value = 1.4;
+    var env = ctx.createGain(); env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(0.5 * k, t + 0.12); env.gain.setValueAtTime(0.5 * k, t + 0.8); env.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    o.connect(amp); amp.connect(bp); bp.connect(env); env.connect(G.sfx); var v = ctx.createGain(); v.gain.value = 0.4; env.connect(v); v.connect(G.sfxVerb);
+    o.start(t); rasp.start(t); o.stop(t + 1.5); rasp.stop(t + 1.5);
+    var fl = this._noise(G, t, 1.3, "lowpass", 1400, 0.8, 0.22 * k, 0.3); fl.frequency.exponentialRampToValueAtTime(300, t + 1.2);
+  },
+  rattle: function(G, t, k) {   // golf cart: loose panels, clubs clinking in the bags
+    this._noise(G, t, 0.03, "bandpass", 2600 + Math.random() * 1800, 3, 0.05 * k);
+    if (Math.random() < 0.5) this._tone(G, t + 0.01, "sine", 1800 + Math.random() * 900, 1500, 0.06, 0.012 * k, 0.2);
+    this._tone(G, t, "sine", 160, 90, 0.05, 0.03 * k);
+  },
+  // ── Interface ── (played on the UI channel)
+  uiHover: function(G, t) { this._tone(G, t, "sine", 1900, 2300, 0.035, 0.018); },
+  uiPress: function(G, t) { var o = this._tone(G, t, "sine", 420, 1250, 0.09, 0.07); this._tone(G, t + 0.01, "triangle", 840, 2500, 0.05, 0.012); },
+  uiBack: function(G, t) { this._tone(G, t, "sine", 900, 360, 0.1, 0.06); },
+  uiOpen: function(G, t) { [72, 79].forEach(function(m, i) { _SFX._tone(G, t + i * 0.05, "sine", _mtof(m), _mtof(m + 0.3), 0.14, 0.045, 0.3); }); },
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CROWD ────────────────────────────────────────────────────────────────────
+// A synthetic gallery: a dozen detuned voices through vowel formants with a
+// shared pitch contour ("ooooh", "awww", "YEAH!"), plus applause built once
+// from hundreds of tiny noise claps, and the odd whistle.
+// ══════════════════════════════════════════════════════════════════════════════
+var _VOWEL = { oo: [320, 800, 2400], oh: [480, 860, 2450], ah: [760, 1180, 2500], aw: [620, 980, 2450], eh: [560, 1720, 2550], ee: [300, 2150, 2900] };
+var _CROWD = {
+  // kind: [vowel from, vowel to, pitch contour [[t, mult]…], dur, voices, gain, applause, whistles]
+  ooh:   ["oo", "oh", [[0, 0.92], [0.35, 1.22], [1.2, 0.86]], 1.3, 12, 0.6, 0, 0],
+  aww:   ["ah", "aw", [[0, 1.28], [0.2, 1.24], [1.2, 0.78]], 1.25, 12, 0.6, 0, 0],
+  gasp:  ["ah", "oh", [[0, 1.35], [0.4, 1.1]], 0.45, 10, 0.5, 0, 0],
+  cheer: ["eh", "ah", [[0, 1.05], [0.12, 1.45], [1.4, 1.25]], 1.5, 14, 0.55, 1.2, 1],
+  roar:  ["eh", "ah", [[0, 1.1], [0.15, 1.6], [2.2, 1.3]], 2.4, 18, 0.7, 2.2, 3],
+  clap:  [null, null, [], 0, 0, 0, 1.0, 0],
+  laugh: ["ah", "ah", [[0, 1.3], [1.1, 1.0]], 1.1, 10, 0.5, 0, 0],
+};
+function _applauseBuffer(G) {
+  if (G._applause) return G._applause;
+  var ctx = G.ctx, sr = ctx.sampleRate, len = Math.floor(sr * 2.6), buf = ctx.createBuffer(2, len, sr);
+  for (var ch = 0; ch < 2; ch++) {
+    var d = buf.getChannelData(ch);
+    for (var c = 0; c < 520; c++) {
+      var at = Math.floor(Math.pow(Math.random(), 1.3) * (len - sr * 0.02)), amp = 0.25 + Math.random() * 0.75, dec = sr * (0.004 + Math.random() * 0.006);
+      for (var i = 0; i < dec * 4; i++) d[at + i] += (Math.random() * 2 - 1) * amp * Math.exp(-i / dec);
+    }
+    for (var j = 0; j < len; j++) d[j] *= 0.35 * Math.min(1, (len - j) / (sr * 1.2));
+  }
+  return (G._applause = buf);
+}
+function _crowd(G, t, kind, k) {
+  var C = _CROWD[kind]; if (!C) return;
+  var ctx = G.ctx, out = ctx.createGain(); out.gain.value = k; out.connect(G.sfx);
+  var vs = ctx.createGain(); vs.gain.value = 0.5; out.connect(vs); vs.connect(G.sfxVerb);
+  if (C[4]) {
+    var dur = C[3], bus = ctx.createGain(), env = ctx.createGain();
+    env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(C[5] * 0.05, t + 0.08); env.gain.setValueAtTime(C[5] * 0.05, t + dur * 0.55); env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    if (kind === "laugh") for (var q = 0; q < 6; q++) { var tq = t + 0.08 + q * 0.16; env.gain.setValueAtTime(C[5] * 0.05, tq); env.gain.linearRampToValueAtTime(C[5] * 0.012, tq + 0.1); }
+    // formant bank, gliding from one vowel to the next
+    var A = _VOWEL[C[0]], B = _VOWEL[C[1]];
+    [0, 1, 2].forEach(function(fi) {
+      var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = [5, 7, 9][fi];
+      bp.frequency.setValueAtTime(A[fi], t); bp.frequency.linearRampToValueAtTime(B[fi], t + dur * 0.8);
+      var fg = ctx.createGain(); fg.gain.value = [1, 0.55, 0.25][fi]; bus.connect(bp); bp.connect(fg); fg.connect(env);
+    });
+    env.connect(out);
+    for (var v = 0; v < C[4]; v++) {
+      var o = ctx.createOscillator(); o.type = "sawtooth";
+      var f = (v % 3 === 0 ? 210 + Math.random() * 60 : 115 + Math.random() * 45) * (0.96 + Math.random() * 0.08), lag = Math.random() * 0.12;
+      o.frequency.setValueAtTime(f * C[2][0][1], t);
+      C[2].forEach(function(p) { o.frequency.linearRampToValueAtTime(f * p[1] * (0.97 + Math.random() * 0.06), t + lag + p[0]); });
+      _SFX._vib(G, o, t, dur + 0.2, 4 + Math.random() * 3, f * 0.025);
+      o.connect(bus); o.start(t + lag * 0.5); o.stop(t + dur + 0.25);
+    }
+    var br = ctx.createBufferSource(); br.buffer = G.white;   // breath on the vowels
+    var bh = ctx.createBiquadFilter(); bh.type = "bandpass"; bh.frequency.value = 1400; bh.Q.value = 0.8;
+    var bg = ctx.createGain(); bg.gain.setValueAtTime(0, t); bg.gain.linearRampToValueAtTime(0.03 * C[5], t + 0.05); bg.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.4, dur * 0.8));
+    br.connect(bh); bh.connect(bg); bg.connect(out); br.start(t, Math.random()); br.stop(t + dur + 0.1);
+  }
+  if (C[6]) {
+    var ap = ctx.createBufferSource(); ap.buffer = _applauseBuffer(G); ap.playbackRate.value = 0.92 + Math.random() * 0.16;
+    var hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 700;
+    var ag = ctx.createGain(); ag.gain.setValueAtTime(0, t); ag.gain.linearRampToValueAtTime(0.5 * C[6], t + 0.15); ag.gain.setValueAtTime(0.5 * C[6], t + 1.0); ag.gain.exponentialRampToValueAtTime(0.0001, t + 2.5);
+    ap.connect(hp); hp.connect(ag); ag.connect(out); ap.start(t + 0.05);
+  }
+  for (var w = 0; w < C[7]; w++) {   // someone in the back whistles
+    var tw = t + 0.2 + Math.random() * 0.8, fw = 1900 + Math.random() * 700;
+    var ow = _SFX._tone({ ctx: ctx, sfx: out, sfxVerb: G.sfxVerb }, tw, "sine", fw, fw * 1.35, 0.32, 0.03, 0.3, 0.03); _SFX._vib(G, ow, tw, 0.35, 7, 30);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── ENGINE (public API) ──────────────────────────────────────────────────────
@@ -1047,7 +1204,7 @@ var AudioEngine = {
   _gameActive: false,
   _menuActive: false,
   _weather: "clear",
-  settings: { music: 0.7, ambience: 0.7, sfx: 0.85, muted: false },
+  settings: { music: 0.7, ambience: 0.7, sfx: 0.85, ui: 0.6, muted: false },
 
   init: function() {
     if (this.ctx) { this.resume(); return; }
@@ -1064,11 +1221,6 @@ var AudioEngine = {
       if (!self.ctx) return;
       if (document.hidden) self.ctx.suspend(); else self.resume();
     });
-    // Soft UI clicks
-    document.addEventListener("click", function(e) {
-      var el = e.target && e.target.closest && e.target.closest("button, .tile, .skin-card:not(.locked), .chip");
-      if (el && self.ctx) self.sfx("click");
-    }, true);
     this.resume();
   },
   resume: function() {
@@ -1097,12 +1249,13 @@ var AudioEngine = {
     set(this.G.musicVol.gain, m * s.music * s.music * 0.85);
     set(this.G.ambVol.gain, m * s.ambience * s.ambience * 1.1);
     set(this.G.sfxVol.gain, m * s.sfx * s.sfx * 1.0);
+    if (this.G.uiVol) set(this.G.uiVol.gain, m * (s.ui === undefined ? 0.6 : s.ui) * (s.ui === undefined ? 0.6 : s.ui));
   },
   setVolume: function(kind, v) { this.settings[kind] = Math.max(0, Math.min(1, v)); this._applyVolumes(); this._saveSettings(); this._syncUI(); },
   toggleMute: function() { this.settings.muted = !this.settings.muted; this._applyVolumes(); this._saveSettings(); this._syncUI(); },
   _syncUI: function() {
     var b = document.getElementById("sound-btn"); if (b) b.classList.toggle("muted", !!this.settings.muted);
-    ["music", "ambience", "sfx"].forEach(function(k) { var el = document.getElementById("vol-" + k); if (el && document.activeElement !== el) el.value = Math.round(AudioEngine.settings[k] * 100); });
+    ["music", "ambience", "sfx", "ui"].forEach(function(k) { var el = document.getElementById("vol-" + k); if (el && document.activeElement !== el) el.value = Math.round(AudioEngine.settings[k] * 100); });
     var mt = document.getElementById("vol-mute"); if (mt) mt.textContent = this.settings.muted ? "Unmute" : "Mute all";
     // "Tap for sound" hint until the browser lets audio run
     var hint = document.getElementById("sound-hint");
@@ -1115,6 +1268,8 @@ var AudioEngine = {
     var t = this.ctx.currentTime;
     if (this.song) this.song.fadeOut(t, 1.4);
     this.song = new _Song(this.G, style, seed, t + 0.12, opts);
+    this.song.intensity = this._intensity || 0;
+    this.song.tempoTgt = this._tempo || 1;
     this._style = style;
   },
   _startAmb: function(recipe, fadeIn) {
@@ -1233,15 +1388,105 @@ var AudioEngine = {
   beatPhase: function() {
     var s = this.song;
     if (!s || !this.ctx || this.ctx.state !== "running") return (typeof T !== "undefined" ? T : performance.now() / 1000) * 2;
-    return Math.max(0, (this.ctx.currentTime - s.t0) / s.spb);
+    return Math.max(0, s.beatAt(this.ctx.currentTime));
   },
 
   // ── One-shot effects ──
-  sfx: function(name, intensity) {
+  // pos (optional): play it in 3D at a world position. Repetitive sounds get ±10 % pitch.
+  sfx: function(name, intensity, pos) {
     if (!this.G || !this.ctx || this.ctx.state !== "running") return;
     var fn = _SFX[name] || _SFX[{ tree: "wood", crater: "energy", lava: "energy", grass: "terrain", snow: "terrain" }[name]];
     if (!fn) return;
-    fn.call(_SFX, this.G, this.ctx.currentTime + 0.005, intensity === undefined ? 0.7 : intensity);
+    var G = this.G, ctx = this.ctx, g2 = G;
+    if (pos || AudioEngine.VARY[name]) {
+      g2 = Object.create(G);
+      if (AudioEngine.VARY[name]) {
+        var cents = (Math.random() * 2 - 1) * 165;   // ≈ ±10 %
+        g2.ctx = new Proxy(ctx, { get: function(tg, pr) {
+          if (pr === "createOscillator") return function() { var o = tg.createOscillator(); o.detune.value = cents; return o; };
+          if (pr === "createBufferSource") return function() { var b = tg.createBufferSource(); b.playbackRate.value = Math.pow(2, cents / 1200); return b; };
+          var v = tg[pr]; return typeof v === "function" ? v.bind(tg) : v;
+        } });
+      }
+      if (pos) {
+        var pn = ctx.createPanner(); pn.panningModel = "equalpower"; pn.distanceModel = "inverse"; pn.refDistance = 6; pn.rolloffFactor = 1.1; pn.maxDistance = 300;
+        if (pn.positionX) { pn.positionX.value = pos.x; pn.positionY.value = pos.y; pn.positionZ.value = pos.z; } else pn.setPosition(pos.x, pos.y, pos.z);
+        pn.connect(G.sfx); g2.sfx = pn;
+        setTimeout(function() { try { pn.disconnect(); } catch (e) {} }, 4000);
+      }
+    }
+    fn.call(_SFX, g2, ctx.currentTime + 0.005, intensity === undefined ? 0.7 : intensity);
+  },
+  VARY: { step: 1, land: 1, bonk: 1, jump: 1, boing: 1, swipe: 1, pickup: 1, terrain: 1, wood: 1, metal: 1, wall: 1, splash: 1, honk: 1, throw: 1, zap: 1 },
+  // UI sounds have their own channel (own volume slider)
+  ui: function(name) {
+    if (!this.G || !this.ctx || this.ctx.state !== "running" || !_SFX[name]) return;
+    var g2 = Object.create(this.G); g2.sfx = this.G.uiVol;
+    _SFX[name].call(_SFX, g2, this.ctx.currentTime + 0.002, 0.6);
+  },
+  // the ears follow the camera
+  listen: function(cam) {
+    if (!this.ctx || !cam) return;
+    var L = this.ctx.listener, p = cam.position, f = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion), u = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    if (L.positionX) { L.positionX.value = p.x; L.positionY.value = p.y; L.positionZ.value = p.z; L.forwardX.value = f.x; L.forwardY.value = f.y; L.forwardZ.value = f.z; L.upX.value = u.x; L.upY.value = u.y; L.upZ.value = u.z; }
+    else { L.setPosition(p.x, p.y, p.z); L.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
+  },
+  // dynamic music: 0 calm … 1 tense (extra percussion layer while the clock runs out)
+  setIntensity: function(v) { if (this.song) this.song.intensity = v; this._intensity = v; },
+  // adaptive tempo: 1 = the song's own speed; changes land on bar lines, ≤ 4 % per bar
+  setTempo: function(m) { this._tempo = m; if (this.song) this.song.tempoTgt = m; },
+
+  // ── The gallery reacts ("ooh", "aww", "gasp", "cheer", "roar", "clap", "laugh") ──
+  crowd: function(kind, k) {
+    if (!this.G || this.ctx.state !== "running") return;
+    if (typeof SET !== "undefined" && SET.v && SET.v.crowd === false) return;
+    var now = this.ctx.currentTime;
+    if (now - (this._crowdT || 0) < 0.6 && kind !== "roar") return;   // one reaction at a time
+    this._crowdT = now;
+    if (kind === "roar" || kind === "cheer") this._duck(0.55, 1.6);
+    _crowd(this.G, now + 0.02, kind, (k === undefined ? 1 : k) * 0.9);
+  },
+
+  // ── Slide whistle: pitch follows the disc's height while it's way up in the air ──
+  slide: function(on, dh) {
+    if (!this.G || this.ctx.state !== "running") return;
+    var ctx = this.ctx, t = ctx.currentTime;
+    if (on && !this._slide) {
+      var o = ctx.createOscillator(); o.type = "sine";
+      var o2 = ctx.createOscillator(); o2.type = "triangle";
+      var lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 6.5; lg.gain.value = 9; lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+      var g = ctx.createGain(); g.gain.value = 0; var g2 = ctx.createGain(); g2.gain.value = 0.18;
+      var lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200;
+      o.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(this.G.sfx);
+      var vs = ctx.createGain(); vs.gain.value = 0.25; g.connect(vs); vs.connect(this.G.sfxVerb);
+      o.start(); o2.start(); lfo.start();
+      this._slide = { o: o, o2: o2, lfo: lfo, g: g };
+    }
+    var S = this._slide; if (!S) return;
+    var f = Math.max(380, Math.min(2300, 520 * Math.pow(2, (dh || 0) / 7)));
+    S.o.frequency.setTargetAtTime(f, t, 0.05); S.o2.frequency.setTargetAtTime(f, t, 0.05);
+    S.g.gain.setTargetAtTime(on ? 0.045 : 0, t, on ? 0.08 : 0.12);
+    if (!on && !S.dying) { S.dying = true; setTimeout(function() { try { S.o.stop(); S.o2.stop(); S.lfo.stop(); S.g.disconnect(); } catch (e) {} }, 700); this._slide = null; }
+  },
+
+  // ── Charge-up whine: rises with the power meter, trembles near the top ──
+  charge: function(k) {
+    if (!this.G || this.ctx.state !== "running") return;
+    var ctx = this.ctx, t = ctx.currentTime, C = this._chg;
+    if (k > 0.02 && !C) {
+      var o = ctx.createOscillator(); o.type = "triangle";
+      var trem = ctx.createOscillator(), tg = ctx.createGain(); trem.frequency.value = 8; tg.gain.value = 0;
+      var g = ctx.createGain(); g.gain.value = 0; var am = ctx.createGain(); am.gain.value = 1;
+      trem.connect(tg); tg.connect(am.gain); o.connect(am); am.connect(g); g.connect(this.G.sfx);
+      o.start(); trem.start();
+      C = this._chg = { o: o, trem: trem, tg: tg, g: g };
+    }
+    if (!C) return;
+    if (k <= 0.02) { C.g.gain.setTargetAtTime(0, t, 0.03); var c2 = C; setTimeout(function() { try { c2.o.stop(); c2.trem.stop(); c2.g.disconnect(); } catch (e) {} }, 300); this._chg = null; return; }
+    C.o.frequency.setTargetAtTime(190 + k * k * 520, t, 0.04);
+    C.trem.frequency.setTargetAtTime(6 + k * 16, t, 0.05);
+    C.tg.gain.setTargetAtTime(k > 0.85 ? 0.5 : k * 0.25, t, 0.05);
+    C.g.gain.setTargetAtTime(0.012 + k * 0.022, t, 0.05);
   },
 };
 

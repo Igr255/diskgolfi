@@ -21,6 +21,7 @@ LIFE.KINDS = {
   crow:   { body: 0x18181c, wing: 0x202024, tip: 0x0a0a0c, size: 0.4, speed: 7.5, flap: 9, glide: 0.4, alt: [6, 14] },
   pigeon: { body: 0x8a8e98, wing: 0x9aa0aa, tip: 0x4a4e58, size: 0.32, speed: 8, flap: 12, glide: 0.3, alt: [8, 24] },
   bat:    { body: 0x1a1420, wing: 0x2a1a2a, tip: 0x0a080c, size: 0.3, speed: 9, flap: 18, glide: 0.05, alt: [5, 14], erratic: 1 },
+  ptero:  { body: 0xb8683a, wing: 0xc87848, tip: 0x5a2a1a, size: 2.6, speed: 6, flap: 2.6, glide: 0.88, alt: [18, 34] },   // pterodactyls (Dino Jungle)
 };
 LIFE.recipe = function(th) {
   if (/^(funny|minion|emote|public_poo)$/.test(th)) return { flocks: [["gull", 6], ["gull", 4]], fish: true };
@@ -34,6 +35,8 @@ LIFE.recipe = function(th) {
   if (th === "hogwarts") return { flocks: [["bat", 9]] };
   if (th === "minecraft") return { flocks: [["song", 7]], butterflies: 6 };
   if (th === "skyblock") return { flocks: [["gull", 5]] };
+  if (th === "bouncy") return { flocks: [["gull", 4]] };
+  if (th === "jungle") return { flocks: [["ptero", 3], ["ptero", 2], ["song", 8]], butterflies: 10 };
   return null;   // indoors, clubs, the moon, geometry dash: no wildlife
 };
 

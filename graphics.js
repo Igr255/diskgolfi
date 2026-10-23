@@ -187,6 +187,10 @@ GFX.THEMES = {
   vetschool:  { zen:0x4a9ae0, hor:0xd8f4ea, gnd:0x6a8a7a, sun:[0xfff6e6,2.5,48,120], hemi:[0xd8f0f0,0x4a8a4a,0.65], fog:[0xd0eee4,0.004], exp:0.92, bloom:0.22, stars:0, clouds:0.45, cloudCol:0xffffff,
                 water:{kind:"water",deep:0x0d4a5a,shallow:0x3aa8b0}, surf:{style:"grass",top:0x5aaa5a,edge:0x6a4a2a,rock1:0x7a7a6a,rock2:0x5a5a4a}, grass:[1.0,0x2a6a2a,0x8ad06a], flowers:[0xffffff,0xff9ac0,0xfff06a] },
 };
+GFX.THEMES.bouncy = { zen:0x2a7ae8, hor:0xa8dcff, gnd:0x2a5ab8, sun:[0xfff2dc,2.1,52,120], hemi:[0xc8e4ff,0xd86ab0,0.55], fog:[0xb8e2ff,0.0022], exp:0.8, env:0.45, bloom:0.22, stars:0, clouds:0.55, cloudCol:0xffffff,
+  water:{kind:"void"}, surf:{style:"grass",top:0xff4a5a,edge:0xffd23a,rock1:0x3a9cff,rock2:0x4ad86a}, grass:[0] };
+GFX.THEMES.jungle = { zen:0x2a7ac0, hor:0xd8e4b0, gnd:0x3a4a2a, sun:[0xffe8b8,2.5,44,125], hemi:[0xd0e8b0,0x2a4a1a,0.6], fog:[0xbcd0a0,0.0034], exp:0.86, bloom:0.3, stars:0, clouds:0.5, cloudCol:0xf6f4ea,
+  water:{kind:"water",deep:0x1a3a24,shallow:0x4a7a44}, surf:{style:"grass",top:0x3a7a24,edge:0x5a3a22,rock1:0x5a5040,rock2:0x4a4030}, grass:[1.3,0x1a5014,0x5aa83a], flowers:[0xff4a6a,0xffd23a,0xff8a2a] };
 GFX.themePreset = function(theme) { return GFX.THEMES[theme] || GFX.THEMES.funny; };
 
 // Weather modifiers: how each weather type shifts a theme preset
@@ -1446,19 +1450,40 @@ GFX.buildHorizon = function(hole) {
 // ── 5. POST-PROCESSING ───────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 GFX.GradeShader = {
-  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.32 }, saturation: { value: 1.08 }, contrast: { value: 1.04 }, time: { value: 0 } },
+  // lines: anime speed lines (0–1) · flash: white impact frame · chroma: RGB split punch · aspect: w / h
+  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.32 }, saturation: { value: 1.08 }, contrast: { value: 1.04 }, time: { value: 0 }, blur: { value: 0 },
+    lines: { value: 0 }, flash: { value: 0 }, chroma: { value: 0 }, aspect: { value: 1.78 } },
   vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
   fragmentShader: [
-    "uniform sampler2D tDiffuse; uniform float vignette; uniform float saturation; uniform float contrast; uniform float time; varying vec2 vUv;",
+    "uniform sampler2D tDiffuse; uniform float vignette; uniform float saturation; uniform float contrast; uniform float time; uniform float blur; varying vec2 vUv;",
+    "uniform float lines; uniform float flash; uniform float chroma; uniform float aspect;",
+    "float h21(vec2 p){ return fract(sin(dot(p, vec2(41.31, 289.17))) * 43758.5453); }",
     "void main(){",
     "  vec4 c = texture2D(tDiffuse, vUv);",
+    "  if (blur > 0.0005) {   // radial speed blur, strongest toward the edges",
+    "    vec2 dir = (vUv - 0.5) * blur * (0.4 + length(vUv - 0.5) * 2.0);",
+    "    c = c * 0.25 + texture2D(tDiffuse, vUv - dir) * 0.2 + texture2D(tDiffuse, vUv - dir * 2.0) * 0.2 + texture2D(tDiffuse, vUv - dir * 3.0) * 0.18 + texture2D(tDiffuse, vUv - dir * 4.0) * 0.17;",
+    "  }",
+    "  if (chroma > 0.001) {   // chromatic punch on big hits",
+    "    vec2 cd = (vUv - 0.5) * chroma * 0.018;",
+    "    c.r = texture2D(tDiffuse, vUv + cd).r; c.b = texture2D(tDiffuse, vUv - cd).b;",
+    "  }",
     "  vec3 col = c.rgb;",
+    "  if (lines > 0.002) {   // speed lines: thin radial streaks that flicker in from the screen edges",
+    "    vec2 q = vUv - 0.5; q.x *= aspect;",
+    "    float r = length(q), A = (atan(q.y, q.x) / 6.2831853 + 0.5) * 150.0, bin = floor(A), f = fract(A);",
+    "    float fr = floor(time * 15.0), on = step(1.0 - 0.42 * lines, h21(vec2(bin, fr)));",
+    "    float w = 0.12 + 0.3 * h21(vec2(bin, 7.0)), m = on * (1.0 - smoothstep(0.0, w, abs(f - 0.5)));",
+    "    float r0 = mix(0.62, 0.34, lines) + 0.14 * h21(vec2(bin, fr + 3.0));",
+    "    col = mix(col, vec3(1.0, 0.98, 0.94), m * smoothstep(r0, r0 + 0.22, r) * 0.62 * min(1.0, lines * 1.6));",
+    "  }",
     "  float l = dot(col, vec3(0.2126,0.7152,0.0722));",
     "  col = mix(vec3(l), col, saturation);",
     "  col = (col - 0.18) * contrast + 0.18;",
     "  col = max(col, 0.0);",
     "  vec2 d = vUv - 0.5; float v = 1.0 - dot(d,d) * vignette * 2.2;",
     "  col *= clamp(v, 0.0, 1.0);",
+    "  col = mix(col, vec3(1.0), flash * 0.75);",
     "  gl_FragColor = vec4(col, 1.0);",
     "  #include <encodings_fragment>",
     "  float n = fract(sin(dot(vUv*vec2(1920.0,1080.0) + time, vec2(12.9898,78.233))) * 43758.5453);",

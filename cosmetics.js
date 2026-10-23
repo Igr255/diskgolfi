@@ -45,6 +45,8 @@ COS.DISC_EXTRA = [
   { id: "circuit", name: "Circuit", rarity: "epic", pattern: "circuit", glowMap: true, trail: 0x3af0ff, particles: "glow", desc: "Overclocked." },
   { id: "synthwave", name: "Synthwave", rarity: "epic", pattern: "synthwave", glowMap: true, trail: 0xff3af0, particles: "glow", desc: "Outrun the wind." },
   { id: "sakura", name: "Sakura", rarity: "epic", pattern: "sakura", trail: 0xffb0d0, particles: "petals", desc: "Petals on the breeze." },
+  { id: "partypop", name: "Party Popper", rarity: "epic", pattern: "tiedye", trail: "rainbow", particles: "confetti", desc: "Every throw is a celebration." },
+  { id: "unicorn", name: "Unicorn", rarity: "epic", pattern: "swirl", pc: ["#ffb0f0", "#b0f0ff"], trail: "rainbow", particles: "stars", desc: "Leaves a rainbow. Obviously." },
   { id: "yinyang", name: "Yin Yang", rarity: "epic", pattern: "yinyang", trail: 0xffffff, desc: "Perfectly balanced flight." },
   { id: "earth", name: "Planet Earth", rarity: "epic", pattern: "earth", trail: 0x4aa0ff, desc: "Throw the world." },
   { id: "donut", name: "Donut", rarity: "epic", shape: "donut", trail: 0xff8ac8, particles: "food", desc: "Pink icing, rainbow sprinkles." },
@@ -85,6 +87,22 @@ COS.STYLE = [
   { id: "hat_sombrero", slot: "hat", name: "Sombrero", rarity: "epic", icon: "🌮" },
   { id: "hat_astro", slot: "hat", name: "Space Helmet", rarity: "epic", icon: "🧑‍🚀" },
   { id: "hat_halo", slot: "hat", name: "Halo", rarity: "legendary", icon: "😇" },
+  { id: "hat_cap", slot: "hat", name: "Backwards Cap", rarity: "common", icon: "🧢" },
+  { id: "hat_beanie", slot: "hat", name: "Beanie", rarity: "common", icon: "🧶" },
+  { id: "hat_bucket", slot: "hat", name: "Bucket Hat", rarity: "common", icon: "🎣" },
+  { id: "hat_fez", slot: "hat", name: "Fez", rarity: "common", icon: "🟥" },
+  { id: "hat_boppers", slot: "hat", name: "Alien Boppers", rarity: "common", icon: "👽" },
+  { id: "hat_chef", slot: "hat", name: "Chef's Toque", rarity: "rare", icon: "👨‍🍳" },
+  { id: "hat_santa", slot: "hat", name: "Santa Hat", rarity: "rare", icon: "🎅" },
+  { id: "hat_grad", slot: "hat", name: "Grad Cap", rarity: "rare", icon: "🎓" },
+  { id: "hat_nest", slot: "hat", name: "Bird Nest", rarity: "rare", icon: "🐣" },
+  { id: "hat_duckie", slot: "hat", name: "Rubber Duckie", rarity: "rare", icon: "🐤" },
+  { id: "hat_tiara", slot: "hat", name: "Tiara", rarity: "rare", icon: "👸" },
+  { id: "hat_unicorn", slot: "hat", name: "Unicorn Horn", rarity: "epic", icon: "🦄" },
+  { id: "hat_jester", slot: "hat", name: "Jester Hat", rarity: "epic", icon: "🃏" },
+  { id: "hat_knight", slot: "hat", name: "Knight Helm", rarity: "epic", icon: "🛡️" },
+  { id: "hat_mohawk", slot: "hat", name: "Rainbow Mohawk", rarity: "epic", icon: "🤘" },
+  { id: "hat_fire", slot: "hat", name: "Flame Head", rarity: "legendary", icon: "🔥" },
   // auras (particles from your feet)
   { id: "aura_sparkle", slot: "aura", name: "Sparkle Steps", rarity: "common", icon: "✨", fx: "sparks" },
   { id: "aura_bubbles", slot: "aura", name: "Bubbles", rarity: "common", icon: "🫧", fx: "bubbles" },
@@ -95,6 +113,14 @@ COS.STYLE = [
   { id: "aura_fire", slot: "aura", name: "Hot Feet", rarity: "epic", icon: "🔥", fx: "fire" },
   { id: "aura_pixels", slot: "aura", name: "Glitch", rarity: "epic", icon: "👾", fx: "pixels" },
   { id: "aura_rainbow", slot: "aura", name: "Rainbow Road", rarity: "legendary", icon: "🌈", fx: "rainbow" },
+  { id: "aura_snacks", slot: "aura", name: "Snack Trail", rarity: "common", icon: "🍩", fx: "food" },
+  { id: "aura_smoke", slot: "aura", name: "Smoke Bomb", rarity: "common", icon: "💨", fx: "smoke" },
+  { id: "aura_confetti", slot: "aura", name: "Party Feet", rarity: "rare", icon: "🎊", fx: "confetti" },
+  { id: "aura_toxic", slot: "aura", name: "Toxic Waste", rarity: "rare", icon: "☢️", fx: "toxic" },
+  { id: "aura_frost", slot: "aura", name: "Frostbite", rarity: "rare", icon: "🥶", fx: "ice" },
+  { id: "aura_stars", slot: "aura", name: "Stardust", rarity: "epic", icon: "🌟", fx: "stars" },
+  { id: "aura_fairy", slot: "aura", name: "Fairy Dust", rarity: "epic", icon: "🧚", fx: "glow" },
+  { id: "aura_holo", slot: "aura", name: "Hologram", rarity: "legendary", icon: "💠", fx: "holo" },
   // finishes (how your character is rendered)
   { id: "fin_shadow", slot: "finish", name: "Shadow", rarity: "rare", icon: "🌑" },
   { id: "fin_frozen", slot: "finish", name: "Frozen", rarity: "rare", icon: "🧊" },
@@ -103,6 +129,23 @@ COS.STYLE = [
   { id: "fin_ghost", slot: "finish", name: "Ghost", rarity: "epic", icon: "👻" },
   { id: "fin_gold", slot: "finish", name: "Solid Gold", rarity: "legendary", icon: "🏆" },
   { id: "fin_rainbow", slot: "finish", name: "Prismatic", rarity: "legendary", icon: "🌈" },
+  { id: "fin_pastel", slot: "finish", name: "Pastel", rarity: "common", icon: "🍬" },
+  { id: "fin_bronze", slot: "finish", name: "Bronze Statue", rarity: "rare", icon: "🥉" },
+  { id: "fin_marble", slot: "finish", name: "Marble", rarity: "rare", icon: "🏛️" },
+  { id: "fin_candy", slot: "finish", name: "Candy Cane", rarity: "epic", icon: "🍭" },
+  { id: "fin_lava", slot: "finish", name: "Molten", rarity: "epic", icon: "🌋" },
+  { id: "fin_toxic", slot: "finish", name: "Radioactive", rarity: "epic", icon: "🧪" },
+  { id: "fin_galaxy", slot: "finish", name: "Galaxy", rarity: "legendary", icon: "🌌" },
+  // back (strapped to the torso — you see it all game long from the throw camera)
+  { id: "back_bag", slot: "back", name: "Disc Bag", rarity: "common", icon: "🎒" },
+  { id: "back_shell", slot: "back", name: "Turtle Shell", rarity: "common", icon: "🐢" },
+  { id: "back_balloon", slot: "back", name: "Balloon", rarity: "common", icon: "🎈" },
+  { id: "back_cape", slot: "back", name: "Hero Cape", rarity: "rare", icon: "🦸" },
+  { id: "back_butterfly", slot: "back", name: "Butterfly Wings", rarity: "rare", icon: "🦋" },
+  { id: "back_fin", slot: "back", name: "Shark Fin", rarity: "rare", icon: "🦈" },
+  { id: "back_bat", slot: "back", name: "Bat Wings", rarity: "epic", icon: "🦇" },
+  { id: "back_jetpack", slot: "back", name: "Jetpack", rarity: "epic", icon: "🚀" },
+  { id: "back_angel", slot: "back", name: "Angel Wings", rarity: "legendary", icon: "👼" },
 ];
 COS.style = function(id) { return COS.STYLE.find(function(s) { return s.id === id; }) || null; };
 
@@ -139,9 +182,9 @@ COS.discSkin = function(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── PROFILE (saved locally) ──────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-COS.state = { cases: { disc: 0, style: 0 }, coins: 0, owned: {}, equip: { hat: null, aura: null, finish: null }, wins: 0, opened: 0, gift: false };
+COS.state = { cases: { disc: 0, style: 0 }, coins: 0, owned: {}, equip: { hat: null, aura: null, finish: null, back: null }, wins: 0, opened: 0, gift: false };
 (function() {
-  try { var s = JSON.parse(localStorage.getItem("dg_profile") || "null"); if (s) { Object.assign(COS.state, s); COS.state.cases = Object.assign({ disc: 0, style: 0 }, s.cases); COS.state.equip = Object.assign({ hat: null, aura: null, finish: null }, s.equip); } } catch (e) {}
+  try { var s = JSON.parse(localStorage.getItem("dg_profile") || "null"); if (s) { Object.assign(COS.state, s); COS.state.cases = Object.assign({ disc: 0, style: 0 }, s.cases); COS.state.equip = Object.assign({ hat: null, aura: null, finish: null, back: null }, s.equip); } } catch (e) {}
   if (!COS.state.gift) { COS.state.gift = true; COS.state.cases.disc += 1; COS.state.cases.style += 1; }   // welcome gift: one of each
 })();
 // Saving merges with what another tab may have saved (two tabs open for multiplayer testing
@@ -177,12 +220,13 @@ COS.SECRET = "DRIPCHECK";
 COS.save();
 COS.ownsStyle = function(id) { return !!COS.state.owned[id]; };
 COS.ownsDisc = function(id) { return typeof unlockedSkins !== "undefined" && !!unlockedSkins[id]; };
-COS.equipped = function() { return { hat: COS.state.equip.hat, aura: COS.state.equip.aura, finish: COS.state.equip.finish }; };
+COS.equipped = function() { return { hat: COS.state.equip.hat, aura: COS.state.equip.aura, finish: COS.state.equip.finish, back: COS.state.equip.back || null }; };
 COS.equip = function(slot, id) {
   COS.state.equip[slot] = COS.state.equip[slot] === id ? null : id;
   COS.save();
   if (typeof localAvatarMesh !== "undefined" && localAvatarMesh && localAvatarMesh.userData.glbLoaded) COS.dressAvatar(localAvatarMesh, COS.equipped());
-  if (typeof mpMode !== "undefined" && mpMode && typeof sendToAll === "function") sendToAll({ t: "cos_equip", from: myIdx, cos: COS.equipped() });
+  if (typeof _lobby3D !== "undefined" && _lobby3D && _lobby3D.me && _lobby3D.me.userData.glbLoaded) COS.dressAvatar(_lobby3D.me, COS.equipped());
+  if (typeof _sendLook === "function") _sendLook();
 };
 COS.casesTotal = function() { return COS.state.cases.disc + COS.state.cases.style; };
 
@@ -583,11 +627,11 @@ COS.HATS = {
   hat_cat: function(g) { [-1, 1].forEach(function(s) { var e = _cosAdd(g, new THREE.ConeGeometry(0.1, 0.2, 4), _cosM(0x2a2a2e), s * 0.15, 0.06, 0); e.rotation.z = -s * 0.25; var i = _cosAdd(g, new THREE.ConeGeometry(0.06, 0.14, 4), _cosM(0xff9ac0), s * 0.15, 0.05, 0.03); i.rotation.z = -s * 0.25; }); },
   hat_bunny: function(g) { [-1, 1].forEach(function(s) { var e = _cosAdd(g, new THREE.SphereGeometry(0.07, 12, 10), _cosM(0xf8f8f8), s * 0.1, 0.22, 0); e.scale.set(0.8, 3.4, 0.6); e.rotation.z = -s * 0.15; var i = _cosAdd(g, new THREE.SphereGeometry(0.045, 10, 8), _cosM(0xffb0c8), s * 0.1, 0.22, 0.03); i.scale.set(0.8, 3.6, 0.3); i.rotation.z = -s * 0.15; }); },
   hat_devil: function(g) { [-1, 1].forEach(function(s) { var h = _cosAdd(g, new THREE.ConeGeometry(0.05, 0.18, 10), _cosM(0xd8202a, { emissive: new THREE.Color(0x400000) }), s * 0.14, 0.05, 0.04); h.rotation.z = -s * 0.4; }); },
-  hat_shades: function(g) {
+  hat_shades: function(g) {   // origin on the eyes, the face surface at z = 0 (see COS.HAT_ANCHOR)
     var blk = _cosM(0x0a0a0e, { roughness: 0.2, metalness: 0.5 });
-    [-1, 1].forEach(function(s) { _cosAdd(g, new THREE.BoxGeometry(0.17, 0.09, 0.03), blk, s * 0.11, -0.2, 0.25); });
-    _cosAdd(g, new THREE.BoxGeometry(0.06, 0.02, 0.02), blk, 0, -0.17, 0.25);
-    [-1, 1].forEach(function(s) { _cosAdd(g, new THREE.BoxGeometry(0.02, 0.02, 0.25), blk, s * 0.2, -0.18, 0.13); });
+    [-1, 1].forEach(function(s) { _cosAdd(g, new THREE.BoxGeometry(0.17, 0.09, 0.03), blk, s * 0.1, 0, 0.025); });
+    _cosAdd(g, new THREE.BoxGeometry(0.05, 0.02, 0.02), blk, 0, 0.025, 0.025);
+    [-1, 1].forEach(function(s) { _cosAdd(g, new THREE.BoxGeometry(0.02, 0.02, 0.24), blk, s * 0.19, 0.02, -0.1); });
   },
   hat_cone: function(g) {
     _cosAdd(g, new THREE.ConeGeometry(0.17, 0.42, 20), _cosM(0xff7a1a), 0, 0.2, 0);
@@ -625,10 +669,10 @@ COS.HATS = {
     [0, 1].forEach(function(k) { var b = _cosAdd(prop, new THREE.BoxGeometry(0.36, 0.01, 0.06), _cosM(k ? 0xffd23a : 0xff3a3a)); b.rotation.y = k * Math.PI / 2; b.rotation.x = 0.2; });
     COS._anim.push({ o: prop, f: function(o, t) { o.rotation.y = t * 14; } });
   },
-  hat_phones: function(g) {
+  hat_phones: function(g) {   // origin in the middle of the head at ear height; the band arcs up to the crown (y = 0.235)
     var blk = _cosM(0x22222a, { roughness: 0.4 }), pad = _cosM(0xff3a8a, { roughness: 0.6 });
-    var band = _cosAdd(g, new THREE.TorusGeometry(0.25, 0.025, 8, 24, Math.PI), blk, 0, -0.17, 0); band.rotation.y = Math.PI / 2;
-    [-1, 1].forEach(function(s) { var cup = _cosAdd(g, new THREE.CylinderGeometry(0.09, 0.09, 0.07, 20), pad, s * 0.26, -0.2, 0); cup.rotation.z = Math.PI / 2; });
+    _cosAdd(g, new THREE.TorusGeometry(0.245, 0.022, 8, 28, Math.PI), blk, 0, 0, 0);
+    [-1, 1].forEach(function(s) { var cup = _cosAdd(g, new THREE.CylinderGeometry(0.085, 0.085, 0.07, 20), pad, s * 0.26, 0, 0); cup.rotation.z = Math.PI / 2; });
   },
   hat_flowers: function(g) {
     var ring = _cosAdd(g, new THREE.TorusGeometry(0.22, 0.025, 8, 28), _cosM(0x3a8a2a), 0, 0.01, 0); ring.rotation.x = Math.PI / 2;
@@ -668,22 +712,251 @@ COS.HATS = {
     h.rotation.x = Math.PI / 2;
     COS._anim.push({ o: h, f: function(o, t) { o.position.y = 0.18 + Math.sin(t * 2) * 0.03; o.rotation.z = t * 0.6; } });
   },
+  // Modelled like the rest: y = 0 on the crown, a head about 0.42 wide, +z is the face
+  hat_cap: function(g) {   // worn backwards, obviously
+    var blu = _cosM(0x2a6aff, { roughness: 0.6 });
+    var d = _cosAdd(g, new THREE.SphereGeometry(0.235, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2), blu, 0, -0.07, 0); d.scale.y = 0.6;
+    var bill = _cosAdd(g, new THREE.CylinderGeometry(0.2, 0.2, 0.02, 24, 1, false, Math.PI * 0.5, Math.PI), _cosM(0xffffff, { roughness: 0.6 }), 0, -0.07, -0.13); bill.scale.set(1, 1, 0.75);
+    _cosAdd(g, new THREE.SphereGeometry(0.025, 8, 6), _cosM(0xffffff), 0, 0.075, 0);
+  },
+  hat_beanie: function(g) {
+    var a = _cosM(0xff5a3a, { roughness: 0.95 }), b = _cosM(0xffd23a, { roughness: 0.95 });
+    var d = _cosAdd(g, new THREE.SphereGeometry(0.24, 22, 14, 0, Math.PI * 2, 0, Math.PI / 2), a, 0, -0.09, 0); d.scale.y = 0.85;
+    var cuff = _cosAdd(g, new THREE.TorusGeometry(0.235, 0.05, 10, 32), b, 0, -0.1, 0); cuff.rotation.x = Math.PI / 2;
+    var band = _cosAdd(g, new THREE.TorusGeometry(0.205, 0.02, 8, 32), b, 0, 0.0, 0); band.rotation.x = Math.PI / 2;
+    _cosAdd(g, new THREE.IcosahedronGeometry(0.075, 1), b, 0, 0.13, 0);
+  },
+  hat_bucket: function(g) {
+    var m = _cosM(0x6a9a5a, { roughness: 0.9, side: THREE.DoubleSide });
+    _cosAdd(g, new THREE.CylinderGeometry(0.17, 0.215, 0.16, 28), m, 0, 0.05, 0);
+    _cosAdd(g, new THREE.CylinderGeometry(0.215, 0.33, 0.07, 32, 1, true), m, 0, -0.06, 0);
+    _cosAdd(g, new THREE.CylinderGeometry(0.218, 0.218, 0.03, 28), _cosM(0xe8e0c8), 0, -0.01, 0);
+  },
+  hat_fez: function(g) {
+    var red = _cosM(0xc8202a, { roughness: 0.7 });
+    _cosAdd(g, new THREE.CylinderGeometry(0.115, 0.15, 0.2, 24), red, 0, 0.09, 0);
+    var t = _cosAdd(g, new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), _cosM(0x1a1a1a), 0.07, 0.13, 0); t.rotation.z = 0.9;
+    _cosAdd(g, new THREE.ConeGeometry(0.025, 0.07, 8), _cosM(0x1a1a1a), 0.13, 0.05, 0);
+  },
+  hat_boppers: function(g) {
+    var band = _cosAdd(g, new THREE.TorusGeometry(0.23, 0.02, 8, 24, Math.PI), _cosM(0x8a3aff), 0, -0.13, 0); band.rotation.y = Math.PI / 2;
+    [-1, 1].forEach(function(sg) {
+      var st = new THREE.Group(); st.position.set(sg * 0.1, 0.06, 0); g.add(st);
+      var stalk = _cosAdd(st, new THREE.CylinderGeometry(0.01, 0.01, 0.24, 6), _cosM(0x2a2a2a), 0, 0.1, 0); stalk.rotation.z = -sg * 0.25; stalk.position.x = sg * 0.03;
+      _cosAdd(st, new THREE.SphereGeometry(0.05, 12, 10), _cosM(0x5aff5a, { emissive: new THREE.Color(0x2aff4a), emissiveIntensity: 0.8 }), sg * 0.06, 0.23, 0);
+      COS._anim.push({ o: st, f: function(o, t) { o.rotation.z = Math.sin(t * 7 + sg) * 0.18; o.rotation.x = Math.cos(t * 5.3 + sg) * 0.12; } });
+    });
+  },
+  hat_chef: function(g) {
+    var w = _cosM(0xfafafa, { roughness: 0.8 });
+    _cosAdd(g, new THREE.CylinderGeometry(0.2, 0.2, 0.14, 28), w, 0, 0.05, 0);
+    [[0, 0.26, 0, 0.14], [0.1, 0.22, 0.06, 0.11], [-0.1, 0.22, 0.06, 0.11], [0.08, 0.22, -0.08, 0.11], [-0.08, 0.22, -0.08, 0.11], [0, 0.21, 0.11, 0.1]].forEach(function(e) { _cosAdd(g, new THREE.IcosahedronGeometry(e[3], 2), w, e[0], e[1], e[2]); });
+  },
+  hat_santa: function(g) {
+    var red = _cosM(0xd8202a, { roughness: 0.8 }), fur = _cosM(0xffffff, { roughness: 1 });
+    var c = _cosAdd(g, new THREE.ConeGeometry(0.2, 0.42, 24), red, -0.05, 0.17, -0.02); c.rotation.z = 0.55;
+    var rim = _cosAdd(g, new THREE.TorusGeometry(0.21, 0.055, 10, 30), fur, 0, -0.01, 0); rim.rotation.x = Math.PI / 2;
+    _cosAdd(g, new THREE.IcosahedronGeometry(0.065, 1), fur, -0.22, 0.27, -0.02);
+  },
+  hat_grad: function(g) {
+    var blk = _cosM(0x16161c, { roughness: 0.6 });
+    _cosAdd(g, new THREE.CylinderGeometry(0.19, 0.2, 0.1, 24), blk, 0, 0.03, 0);
+    var b = _cosAdd(g, new THREE.BoxGeometry(0.5, 0.025, 0.5), blk, 0, 0.09, 0); b.rotation.y = Math.PI / 4;
+    _cosAdd(g, new THREE.CylinderGeometry(0.025, 0.025, 0.02, 10), _cosM(0xffc83a), 0, 0.11, 0);
+    var tas = new THREE.Group(); tas.position.set(0, 0.11, 0); g.add(tas);
+    var cord = _cosAdd(tas, new THREE.CylinderGeometry(0.006, 0.006, 0.24, 5), _cosM(0xffc83a), 0.12, 0, 0.12); cord.rotation.set(Math.PI / 2, 0, 0); cord.rotation.y = Math.PI / 4;
+    var hang = _cosAdd(tas, new THREE.CylinderGeometry(0.012, 0.03, 0.12, 8), _cosM(0xffc83a), 0.17, -0.07, 0.17);
+    COS._anim.push({ o: tas, f: function(o, t) { o.rotation.y = Math.sin(t * 2.2) * 0.12; } });
+  },
+  hat_nest: function(g) {
+    var tw = _cosM(0x7a5228, { roughness: 1 }), r = _gfxRng(5);
+    var n = _cosAdd(g, new THREE.TorusGeometry(0.17, 0.06, 8, 20), tw, 0, 0.03, 0); n.rotation.x = Math.PI / 2;
+    for (var i = 0; i < 22; i++) { var a = r() * 6.283, st = _cosAdd(g, new THREE.CylinderGeometry(0.008, 0.008, 0.2, 4), tw, Math.cos(a) * 0.17, 0.03 + (r() - 0.5) * 0.05, Math.sin(a) * 0.17); st.rotation.set(r() * 3, r() * 3, r() * 3); }
+    var chick = new THREE.Group(); chick.position.y = 0.06; g.add(chick);
+    var yel = _cosM(0xffe03a, { roughness: 0.7 });
+    _cosAdd(chick, new THREE.SphereGeometry(0.08, 14, 10), yel, 0, 0.03, 0);
+    _cosAdd(chick, new THREE.SphereGeometry(0.055, 12, 10), yel, 0, 0.12, 0.02);
+    _cosAdd(chick, new THREE.ConeGeometry(0.02, 0.05, 8), _cosM(0xff8a1a), 0, 0.12, 0.08).rotation.x = Math.PI / 2;
+    [-1, 1].forEach(function(sg) { _cosAdd(chick, new THREE.SphereGeometry(0.01, 6, 5), _cosM(0x000000), sg * 0.025, 0.14, 0.065); });
+    COS._anim.push({ o: chick, f: function(o, t) { o.position.y = 0.06 + Math.abs(Math.sin(t * 3)) * 0.03; o.rotation.y = Math.sin(t * 1.3) * 0.8; } });
+  },
+  hat_duckie: function(g) {
+    var duck = new THREE.Group(); g.add(duck);
+    var yel = _cosM(0xffd21a, { roughness: 0.25 });
+    var b = _cosAdd(duck, new THREE.SphereGeometry(0.15, 18, 12), yel, 0, 0.09, -0.02); b.scale.set(1, 0.72, 1.25);
+    var tail = _cosAdd(duck, new THREE.ConeGeometry(0.06, 0.1, 10), yel, 0, 0.14, -0.18); tail.rotation.x = -0.9;
+    _cosAdd(duck, new THREE.SphereGeometry(0.095, 16, 12), yel, 0, 0.23, 0.08);
+    var bk = _cosAdd(duck, new THREE.SphereGeometry(0.05, 10, 8), _cosM(0xff7a1a, { roughness: 0.3 }), 0, 0.21, 0.17); bk.scale.set(1.2, 0.45, 1);
+    [-1, 1].forEach(function(sg) { _cosAdd(duck, new THREE.SphereGeometry(0.017, 8, 6), _cosM(0x101010), sg * 0.05, 0.26, 0.15); });
+    COS._anim.push({ o: duck, f: function(o, t) { o.rotation.z = Math.sin(t * 2.4) * 0.12; o.rotation.x = Math.sin(t * 1.7) * 0.06; } });
+  },
+  hat_tiara: function(g) {
+    var gold = _cosM(0xffd8a0, { metalness: 0.85, roughness: 0.2 });
+    var band = _cosAdd(g, new THREE.TorusGeometry(0.2, 0.014, 8, 28, Math.PI), gold, 0, -0.03, 0); band.rotation.x = Math.PI / 2; band.rotation.z = Math.PI; band.rotation.y = 0; band.scale.y = 1.05;
+    for (var i = -2; i <= 2; i++) { var a = i * 0.32, h = i === 0 ? 0.11 : 0.06 - Math.abs(i) * 0.01; var sp = _cosAdd(g, new THREE.ConeGeometry(0.02, h, 6), gold, Math.sin(a) * 0.2, -0.03 + h / 2, Math.cos(a) * 0.2); sp.rotation.x = 0.35 * Math.cos(a); }
+    _cosAdd(g, new THREE.OctahedronGeometry(0.03, 0), _cosM(0xff3a9a, { roughness: 0.05, metalness: 0.2, emissive: new THREE.Color(0x60002a) }), 0, 0.02, 0.21);
+    [-1, 1].forEach(function(sg) { _cosAdd(g, new THREE.OctahedronGeometry(0.018, 0), _cosM(0x3ad8ff, { roughness: 0.05 }), Math.sin(sg * 0.5) * 0.2, -0.01, Math.cos(0.5) * 0.2); });
+  },
+  hat_unicorn: function(g) {
+    var horn = new THREE.Group(); horn.position.set(0, 0.0, 0.1); horn.rotation.x = 0.45; g.add(horn);
+    _cosAdd(horn, new THREE.ConeGeometry(0.055, 0.32, 16), _cosM(0xfff0c8, { metalness: 0.4, roughness: 0.25, emissive: new THREE.Color(0x3a2a10) }), 0, 0.16, 0);
+    var pts = []; for (var i = 0; i <= 40; i++) { var k = i / 40, r = 0.056 * (1 - k) + 0.004; pts.push(new THREE.Vector3(Math.cos(k * 18) * r, k * 0.31, Math.sin(k * 18) * r)); }
+    _cosAdd(horn, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 80, 0.008, 5, false), _cosM(0xff8ad8, { emissive: new THREE.Color(0x401030) }));
+    var cols = [0xff6ab0, 0xffd23a, 0x6ae0ff, 0xb08aff];
+    for (var j = 0; j < 4; j++) { var m = _cosAdd(g, new THREE.SphereGeometry(0.06, 10, 8), _cosM(cols[j], { roughness: 0.6 }), 0, -0.02 - j * 0.02, -0.02 - j * 0.07); m.scale.set(0.6, 1, 1.4); }
+  },
+  hat_jester: function(g) {
+    var cols = [0xd8202a, 0xffc83a, 0x3a5aff];
+    var d = _cosAdd(g, new THREE.SphereGeometry(0.235, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), _cosM(0x6a2a9a, { roughness: 0.8 }), 0, -0.07, 0); d.scale.y = 0.62;
+    [-1, 0, 1].forEach(function(k, i) {
+      var a = k * 1.05, ex = new THREE.Vector3(Math.sin(a) * 0.36, 0.2, Math.cos(a) * 0.36 - 0.05);
+      var c = new THREE.QuadraticBezierCurve3(new THREE.Vector3(Math.sin(a) * 0.1, 0.02, Math.cos(a) * 0.1 - 0.04), new THREE.Vector3(Math.sin(a) * 0.22, 0.32, Math.cos(a) * 0.22 - 0.05), ex);
+      _cosAdd(g, new THREE.TubeGeometry(c, 12, 0.045, 8, false), _cosM(cols[i], { roughness: 0.8 }));
+      var bell = new THREE.Group(); bell.position.copy(ex); g.add(bell);
+      _cosAdd(bell, new THREE.SphereGeometry(0.04, 10, 8), _cosM(0xffd23a, { metalness: 0.9, roughness: 0.2 }), 0, -0.03, 0);
+      COS._anim.push({ o: bell, f: function(o, t) { o.rotation.z = Math.sin(t * 6 + i * 2) * 0.4; } });
+    });
+  },
+  hat_knight: function(g) {
+    var steel = _cosM(0xb8c0c8, { metalness: 0.9, roughness: 0.28 });
+    var h = _cosAdd(g, new THREE.SphereGeometry(0.27, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), steel, 0, -0.2, 0); h.scale.set(1, 1.08, 1.05);
+    _cosAdd(g, new THREE.BoxGeometry(0.3, 0.035, 0.05), _cosM(0x0a0a10), 0, -0.2, 0.26);
+    var ridge = _cosAdd(g, new THREE.BoxGeometry(0.03, 0.08, 0.5), steel, 0, 0.06, -0.02); ridge.rotation.x = 0.1;
+    var pl = new THREE.Group(); pl.position.set(0, 0.08, -0.05); g.add(pl);
+    for (var i = 0; i < 6; i++) { var f = _cosAdd(pl, new THREE.SphereGeometry(0.06, 10, 8), _cosM(0xd8202a, { roughness: 0.9 }), 0, 0.06 + i * 0.012, -i * 0.05); f.scale.set(0.5, 1.6 - i * 0.12, 1.2); }
+    COS._anim.push({ o: pl, f: function(o, t) { o.rotation.x = Math.sin(t * 3) * 0.08; } });
+  },
+  hat_mohawk: function(g) {
+    for (var i = 0; i < 7; i++) {
+      var k = i / 6, z = 0.2 - k * 0.42, h = 0.2 + Math.sin(k * Math.PI) * 0.12;
+      var c = _cosAdd(g, new THREE.ConeGeometry(0.05, h, 10), _cosM(new THREE.Color().setHSL(k * 0.8, 0.95, 0.55).getHex(), { roughness: 0.6 }), 0, -0.03 + h / 2, z);
+      c.rotation.x = -0.35 + k * 0.7; c.scale.z = 0.5;
+    }
+  },
+  hat_fire: function(g) {   // layered tongues: red outside, orange, a yellow core (not additive — that just burns out to white)
+    var layers = [[0xe8280a, 0.11, 0.3, 7, 0.13], [0xff7a12, 0.085, 0.36, 5, 0.07], [0xffd23a, 0.07, 0.3, 3, 0.02]];
+    layers.forEach(function(L, li) {
+      var mat = new THREE.MeshBasicMaterial({ color: L[0], transparent: true, opacity: 0.92, depthWrite: li === 0, toneMapped: false });
+      for (var i = 0; i < L[3]; i++) {
+        var a = i / L[3] * Math.PI * 2 + li, f = _cosAdd(g, new THREE.ConeGeometry(L[1], L[2], 8), mat, Math.cos(a) * L[4], 0.0, Math.sin(a) * L[4]);
+        f.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3);
+        (function(f, ph, h) { COS._anim.push({ o: f, f: function(o, t) { var k = 0.7 + Math.abs(Math.sin(t * 8 + ph)) * 0.55; o.scale.set(1, k, 1); o.position.y = h * k * 0.5 - 0.02; } }); })(f, i * 1.7 + li, L[2]);
+      }
+    });
+  },
 };
+// ── Back items ── modelled for a torso 0.4 wide, origin on the middle of the back, the body
+// toward +z (so they hang off toward −z). k.top = how far up the shoulders are, in item units.
+function _cosLine(g, a, b, r, mat) { var d = new THREE.Vector3().subVectors(b, a), m = _cosAdd(g, new THREE.CylinderGeometry(r, r, d.length(), 5), mat); m.position.copy(a).addScaledVector(d, 0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()); return m; }
+function _cosWing(g, side, shape, mat, flap, sp) {
+  var w = new THREE.Group(); w.position.set(side * 0.03, 0, -0.07); g.add(w);
+  var geo = new THREE.ShapeGeometry(shape, 16); if (side < 0) geo.scale(-1, 1, 1);
+  _cosAdd(w, geo, mat);
+  COS._anim.push({ o: w, f: function(o, t) { o.rotation.y = -side * (flap[0] + Math.sin(t * sp) * flap[1]); } });
+  return w;
+}
+COS.BACKS = {
+  back_bag: function(g, k) {
+    var bag = _cosM(0x2a6a9a, { roughness: 0.8 }), trim = _cosM(0x16161c, { roughness: 0.7 });
+    _cosAdd(g, new THREE.BoxGeometry(0.3, 0.44, 0.15), bag, 0, -0.02, -0.08);
+    _cosAdd(g, new THREE.BoxGeometry(0.31, 0.05, 0.16), trim, 0, 0.18, -0.08);
+    _cosAdd(g, new THREE.BoxGeometry(0.22, 0.16, 0.04), _cosM(0x3a8ac8, { roughness: 0.8 }), 0, -0.1, -0.17);
+    [[-0.08, 0xff3a8a, -0.2], [0, 0xffd23a, 0.05], [0.08, 0x3aff8a, 0.25]].forEach(function(e) { var d = _cosAdd(g, new THREE.CylinderGeometry(0.11, 0.11, 0.025, 24), _cosM(e[1], { roughness: 0.35 }), e[0], 0.26, -0.08); d.rotation.set(Math.PI / 2, 0, Math.PI / 2 + e[2]); });
+  },
+  back_shell: function(g, k) {
+    var sh = _cosAdd(g, new THREE.SphereGeometry(0.27, 22, 14, 0, Math.PI * 2, 0, Math.PI / 2), _cosM(0x3a7a2a, { roughness: 0.7 }), 0, 0, -0.02); sh.rotation.x = -Math.PI / 2; sh.scale.set(1, 1, 0.55);
+    var rim = _cosAdd(g, new THREE.TorusGeometry(0.27, 0.03, 8, 30), _cosM(0xd8c070, { roughness: 0.8 }), 0, 0, -0.02);
+    var sc = _cosM(0x5aa83a, { roughness: 0.6 });
+    _cosAdd(g, new THREE.CylinderGeometry(0.085, 0.085, 0.02, 6), sc, 0, 0, -0.165).rotation.x = Math.PI / 2;
+    for (var i = 0; i < 6; i++) { var a = i / 6 * Math.PI * 2, h = _cosAdd(g, new THREE.CylinderGeometry(0.07, 0.07, 0.02, 6), sc, Math.cos(a) * 0.16, Math.sin(a) * 0.16, -0.12); h.lookAt(new THREE.Vector3(Math.cos(a) * 0.5, Math.sin(a) * 0.5, -0.4)); h.rotateX(Math.PI / 2); }
+  },
+  back_balloon: function(g, k) {
+    var b = new THREE.Group(); b.position.set(0.05, 0.05, -0.05); g.add(b);
+    var top = new THREE.Vector3(0.1, 0.85 + k.top, -0.2);
+    _cosLine(b, new THREE.Vector3(0, 0, 0), top, 0.004, _cosM(0xffffff));
+    var bal = _cosAdd(b, new THREE.SphereGeometry(0.16, 20, 14), _cosM(0xff2a4a, { roughness: 0.15, metalness: 0.1 }), top.x, top.y + 0.17, top.z); bal.scale.y = 1.15;
+    _cosAdd(b, new THREE.ConeGeometry(0.025, 0.04, 8), _cosM(0xff2a4a), top.x, top.y + 0.005, top.z);
+    COS._anim.push({ o: b, f: function(o, t) { o.rotation.z = Math.sin(t * 1.3) * 0.12; o.rotation.x = -0.05 + Math.sin(t * 0.9) * 0.08; } });
+  },
+  back_cape: function(g, k) {
+    var c = new THREE.Group(); c.position.set(0, k.top * 0.9, 0.0); g.add(c);
+    var len = Math.min(1.0, ((k.down || 1.2) + k.top * 0.9) * 0.78);   // short legs, short cape: it never drags on the ground
+    var geo = new THREE.PlaneGeometry(0.44, len, 4, 10); geo.translate(0, -len / 2, 0);
+    var p = geo.attributes.position;
+    for (var i = 0; i < p.count; i++) { var y = -p.getY(i); p.setX(i, p.getX(i) * (1 + y * 0.55)); p.setZ(i, -0.03 - y * y * 0.06 - Math.abs(p.getX(i)) * 0.15); }
+    geo.computeVertexNormals();
+    _cosAdd(c, geo, _cosM(0xd8202a, { roughness: 0.7, side: THREE.DoubleSide }));
+    [-1, 1].forEach(function(sg) { _cosAdd(c, new THREE.SphereGeometry(0.035, 10, 8), _cosM(0xffc83a, { metalness: 0.8, roughness: 0.3 }), sg * 0.2, 0, 0.01); });
+    COS._anim.push({ o: c, f: function(o, t) { o.rotation.x = 0.14 + Math.sin(t * 2.3) * 0.06; o.rotation.z = Math.sin(t * 1.7) * 0.04; } });
+  },
+  back_butterfly: function(g, k) {
+    var up = new THREE.Shape(); up.moveTo(0, 0); up.bezierCurveTo(0.1, 0.35, 0.42, 0.42, 0.44, 0.22); up.bezierCurveTo(0.45, 0.06, 0.2, 0.0, 0, 0);
+    var lo = new THREE.Shape(); lo.moveTo(0, -0.02); lo.bezierCurveTo(0.25, -0.02, 0.34, -0.2, 0.24, -0.3); lo.bezierCurveTo(0.12, -0.36, 0.04, -0.2, 0, -0.02);
+    var m1 = _cosM(0x3ab0ff, { side: THREE.DoubleSide, transparent: true, opacity: 0.88, emissive: new THREE.Color(0x0a3a6a), roughness: 0.4 });
+    var m2 = _cosM(0xff8ad8, { side: THREE.DoubleSide, transparent: true, opacity: 0.88, emissive: new THREE.Color(0x4a0a3a), roughness: 0.4 });
+    var yk = k.top * 0.35;
+    [-1, 1].forEach(function(sg) {
+      var w = _cosWing(g, sg, up, m1, [0.35, 0.4], 7); w.position.y = yk;
+      var geo = new THREE.ShapeGeometry(lo, 12); if (sg < 0) geo.scale(-1, 1, 1); _cosAdd(w, geo, m2);
+      [[0.3, 0.2, 0.045], [0.18, -0.15, 0.035]].forEach(function(d) { _cosAdd(w, new THREE.CircleGeometry(d[2], 12), _cosM(0xffffff, { side: THREE.DoubleSide }), sg * d[0], d[1], 0.002); });
+    });
+  },
+  back_fin: function(g, k) {
+    var s = new THREE.Shape(); s.moveTo(0, -0.2); s.quadraticCurveTo(0.06, 0.18, 0.32, 0.4); s.quadraticCurveTo(0.18, 0.08, 0.2, -0.2); s.lineTo(0, -0.2);
+    var geo = new THREE.ExtrudeGeometry(s, { depth: 0.05, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 12 });
+    geo.rotateY(Math.PI / 2); geo.translate(-0.025, k.top * 0.2, -0.02);
+    _cosAdd(g, geo, _cosM(0x6a8aa8, { roughness: 0.45 }));
+  },
+  back_bat: function(g, k) {
+    var s = new THREE.Shape(); s.moveTo(0, 0.05); s.quadraticCurveTo(0.25, 0.35, 0.62, 0.3);
+    s.quadraticCurveTo(0.5, 0.12, 0.52, 0.0); s.quadraticCurveTo(0.4, 0.06, 0.36, -0.08); s.quadraticCurveTo(0.26, -0.0, 0.2, -0.12); s.quadraticCurveTo(0.12, -0.02, 0, -0.06); s.lineTo(0, 0.05);
+    var m = _cosM(0x3a1a4a, { side: THREE.DoubleSide, roughness: 0.6, emissive: new THREE.Color(0x14001e) });
+    [-1, 1].forEach(function(sg) { var w = _cosWing(g, sg, s, m, [0.3, 0.32], 3.6); w.position.y = k.top * 0.45; _cosLine(w, new THREE.Vector3(0, 0.04, 0.005), new THREE.Vector3(sg * 0.62, 0.3, 0.005), 0.012, _cosM(0x22102a)); });
+  },
+  back_jetpack: function(g, k) {
+    var red = _cosM(0xd8302a, { metalness: 0.6, roughness: 0.3 }), grey = _cosM(0x8a96a2, { metalness: 0.8, roughness: 0.3 });
+    _cosAdd(g, new THREE.BoxGeometry(0.3, 0.32, 0.04), grey, 0, 0.02, -0.03);
+    [-1, 1].forEach(function(sg) {
+      _cosAdd(g, new THREE.CylinderGeometry(0.075, 0.075, 0.34, 18), red, sg * 0.09, 0.03, -0.11);
+      _cosAdd(g, new THREE.SphereGeometry(0.075, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), red, sg * 0.09, 0.2, -0.11);
+      var nz = _cosAdd(g, new THREE.ConeGeometry(0.055, 0.08, 14, 1, true), _cosM(0x2a2a30, { metalness: 0.7, side: THREE.DoubleSide }), sg * 0.09, -0.17, -0.11);
+      var fl = _cosAdd(g, new THREE.ConeGeometry(0.05, 0.22, 12), new THREE.MeshBasicMaterial({ color: 0xff8a1a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }), sg * 0.09, -0.31, -0.11);
+      fl.rotation.x = Math.PI;
+      (function(fl, ph) { COS._anim.push({ o: fl, f: function(o, t) { var q = 0.7 + Math.abs(Math.sin(t * 23 + ph)) * 0.5; o.scale.set(1, q, 1); o.position.y = -0.21 - 0.11 * q; } }); })(fl, sg);
+    });
+  },
+  back_angel: function(g, k) {
+    var mat = _cosM(0xffffff, { roughness: 0.55, emissive: new THREE.Color(0xfff0c8), emissiveIntensity: 0.35 });
+    [-1, 1].forEach(function(sg) {
+      var w = new THREE.Group(); w.position.set(sg * 0.04, k.top * 0.5, -0.08); g.add(w);
+      [[0.62, 9, 0.0], [0.42, 7, 0.012], [0.25, 5, 0.024]].forEach(function(row) {
+        for (var i = 0; i < row[1]; i++) {
+          var a = 1.0 - i * (1.55 / row[1]), L = row[0] * (1 - i * 0.05), f = _cosAdd(w, new THREE.SphereGeometry(1, 10, 6), mat, sg * Math.cos(a) * L * 0.5, Math.sin(a) * L * 0.5, -row[2]);
+          f.rotation.z = sg * a; f.scale.set(L * 0.5, 0.045, 0.018);
+        }
+      });
+      COS._anim.push({ o: w, f: function(o, t) { o.rotation.y = -sg * (0.25 + Math.sin(t * 2.2) * 0.22); } });
+    });
+  },
+};
+COS.buildBack = function(id, k) { var g = new THREE.Group(); g.name = "cos_back"; if (COS.BACKS[id]) COS.BACKS[id](g, k || { top: 0.25, down: 1.2 }); g.traverse(function(m) { if (m.isMesh) { m.castShadow = true; m.userData.cosHat = true; } }); return g; };
 COS.buildHat = function(id) { var g = new THREE.Group(); g.name = "cos_hat"; if (COS.HATS[id]) COS.HATS[id](g); g.traverse(function(m) { if (m.isMesh) { m.castShadow = true; m.userData.cosHat = true; } }); return g; };
 
 // Apply hat + finish + aura to a loaded character (wrapper group from buildPlayerAvatar)
 COS.dressAvatar = function(av, cos) {
   if (!av) return;
   cos = cos || {};
-  var glb = null; av.children.forEach(function(c) { if (c.name !== "cos_hat" && !glb) glb = c; });
+  var glb = null; av.children.forEach(function(c) { if (c.name !== "cos_hat" && c.name !== "cos_back" && !glb) glb = c; });
   if (!glb) return;
-  // remove a previous hat
-  var old = []; av.traverse(function(o) { if (o.name === "cos_hat") old.push(o); }); old.forEach(function(o) { o.parent.remove(o); });
+  if (typeof ANIM !== "undefined") ANIM.ungoofy(av);   // fit the hat to the real skull; the bobblehead comes back next frame
+  // remove a previous hat / back item
+  var old = []; av.traverse(function(o) { if (o.name === "cos_hat" || o.name === "cos_back") old.push(o); }); old.forEach(function(o) { o.parent.remove(o); });
   // finish: restore original materials, then apply
   glb.traverse(function(m) { if (m.isMesh && m.userData._cosOrig) { m.material = m.userData._cosOrig; delete m.userData._cosOrig; } });
   if (cos.finish) COS.applyFinish(glb, cos.finish);
   av.userData.aura = cos.aura ? (COS.style(cos.aura) || {}).fx : null;
-  if (!cos.hat) return;
+  if (cos.back) COS._wearBack(av, glb, cos.back);
+  if (!cos.hat) { if (typeof ANIM !== "undefined") ANIM.goofy(av); return; }
   var hat = COS.buildHat(cos.hat);
   // Find the head bone (hats follow head-bob animations); fall back to the top of the model
   var head = null; glb.traverse(function(o) { if (!head && o.isBone && /^(mixamorig:)?head$/i.test(o.name)) head = o; });
@@ -697,8 +970,8 @@ COS.dressAvatar = function(av, cos) {
     // Fit to the skull: hats are modelled for a head ~0.42 m wide with y = 0 on top
     var fit = COS.headFit(glb, head, hp, qa), size = 1, at = new THREE.Vector3(hp.x, top - 0.02, hp.z);
     if (fit) { size = fit.halfW / 0.21; at.set(fit.cx, fit.top - 0.02 * size, fit.cz).applyQuaternion(qa).add(hp); }
+    COS._placeHat(hat, cos.hat, fit, size, at, qa, hp, ws);
     hat.position.copy(head.worldToLocal(at));
-    hat.scale.setScalar(size / ws.x);
     hat.quaternion.copy(qb.invert().multiply(qa));
     head.add(hat);
   } else {
@@ -706,10 +979,64 @@ COS.dressAvatar = function(av, cos) {
     var aq = new THREE.Quaternion(); av.getWorldQuaternion(aq);
     var as = new THREE.Vector3(); av.getWorldScale(as);
     var tf = COS.topFit(glb, ap, aq);
-    if (tf) { var sz = tf.halfW / 0.21; hat.position.set(tf.cx / as.x, (tf.top - 0.02 * sz) / as.y, tf.cz / as.z); hat.scale.setScalar(sz / as.x); }
+    if (tf) {
+      var sz = tf.halfW / 0.21, lat = new THREE.Vector3(tf.cx, tf.top - 0.02 * sz, tf.cz);
+      COS._placeHat(hat, cos.hat, tf, sz, lat, new THREE.Quaternion(), new THREE.Vector3(), as);   // (already in the avatar's own frame)
+      hat.position.set(lat.x / as.x, lat.y / as.y, lat.z / as.z);
+    }
     else { var lp = av.worldToLocal(new THREE.Vector3(0, top, 0)); hat.position.set(0, lp.y - 0.02, 0); }
     av.add(hat);
   }
+  if (typeof ANIM !== "undefined") ANIM.goofy(av);
+};
+// Strap a back item to the upper torso. Sized from the shoulder span and placed on the real,
+// posed surface of the back (built-in backpacks and shells included), so it fits a skinny agent,
+// a chibi pirate, a rigid robot or an unrigged duck alike.
+COS._wearBack = function(av, glb, id) {
+  var fit = COS.backFit(av, glb); if (!fit) return;
+  var qa = new THREE.Quaternion(); av.getWorldQuaternion(qa);
+  var size = Math.max(0.25, fit.halfW / 0.2), item = COS.buildBack(id, { top: Math.max(0.05, (fit.y1 - fit.cy) / size), down: Math.max(0.2, fit.cy / size) });
+  var at = av.localToWorld(new THREE.Vector3(fit.cx, fit.cy, fit.zb).divide(av.getWorldScale(new THREE.Vector3()))), par = fit.bone || av;
+  var ws = new THREE.Vector3(); par.getWorldScale(ws);
+  var qb = new THREE.Quaternion(); par.getWorldQuaternion(qb);
+  item.position.copy(par.worldToLocal(at));
+  item.scale.setScalar(size / ws.x);
+  item.quaternion.copy(qb.invert().multiply(qa));
+  par.add(item);
+};
+// In the avatar's frame (metres, +z forward): the torso band between the hips and the shoulders,
+// its back surface (low z, from every posed vertex in the band), centre and half width
+COS.backFit = function(av, glb) {
+  av.updateMatrixWorld(true);
+  var qa = new THREE.Quaternion(), qi, origin = new THREE.Vector3(), v = new THREE.Vector3();
+  av.getWorldQuaternion(qa); qi = qa.clone().invert(); av.getWorldPosition(origin);
+  var loc = function(w) { return w.sub(origin).applyQuaternion(qi); };
+  var R = typeof RAG !== "undefined" ? RAG.rig(glb) : null, pts = [];
+  glb.traverse(function(m) {
+    if (!m.isMesh || m.userData.cosHat || !m.geometry || !m.geometry.attributes.position) return;
+    var pos = m.geometry.attributes.position, st = Math.max(1, Math.floor(pos.count / 5000)), sk = m.isSkinnedMesh && m.skeleton && m.boneTransform;
+    for (var i = 0; i < pos.count; i += st) {
+      if (sk) m.boneTransform(i, v); else v.fromBufferAttribute(pos, i);
+      pts.push(loc(v.applyMatrix4(m.matrixWorld)).clone());
+    }
+  });
+  if (pts.length < 40) return null;
+  var yTop, yBot, cx = 0, halfW, bone = null;
+  if (R) {
+    var sl = loc(R.uaL.getWorldPosition(new THREE.Vector3())), sr = loc(R.uaR.getWorldPosition(new THREE.Vector3())), hp = loc(R.hips.getWorldPosition(new THREE.Vector3()));
+    yTop = (sl.y + sr.y) / 2; yBot = hp.y + (yTop - hp.y) * 0.3; cx = (sl.x + sr.x) / 2; halfW = Math.abs(sl.x - sr.x) / 2 * 1.05;
+    bone = R.neck && R.neck.parent && R.neck.parent.isBone ? R.neck.parent : null;   // the upper chest, whatever the rig calls it
+  } else {
+    var lo = Infinity, hi = -Infinity, x0 = Infinity, x1 = -Infinity;
+    pts.forEach(function(p) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); });
+    yTop = lo + (hi - lo) * 0.7; yBot = lo + (hi - lo) * 0.4;
+    pts.forEach(function(p) { if (p.y > yBot && p.y < yTop) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); } });
+    cx = (x0 + x1) / 2; halfW = (x1 - x0) / 2 * 0.8;
+  }
+  var band = pts.filter(function(p) { return p.y > yBot && p.y < yTop + (yTop - yBot) * 0.1 && Math.abs(p.x - cx) < halfW * 0.8; });
+  if (band.length < 10) return null;
+  var zs = band.map(function(p) { return p.z; }).sort(function(a, b) { return a - b; });
+  return { cx: cx, cy: (yBot + yTop) / 2 + (yTop - yBot) * 0.1, y1: yTop, zb: zs[Math.floor(zs.length * 0.02)], halfW: halfW, bone: bone };
 };
 // Measure the skull from the vertices skinned to the head bone, in the avatar's frame
 // (origin at the head bone). Spiky or tall hair is ignored: the "top" is the highest
@@ -754,8 +1081,57 @@ COS._sliceFit = function(pts) {
   var wOf = function(b) { return b.x1 > b.x0 ? b.x1 - b.x0 : 0; }, maxW = 0, wide = null;
   sl.forEach(function(b) { maxW = Math.max(maxW, wOf(b)); });
   for (j = N - 1; j >= 0; j--) if (wOf(sl[j]) >= maxW * 0.72) { wide = j; break; }
-  var ref = sl[wide];
-  return { halfW: maxW / 2, top: y0 + (wide + 1) / N * (y1 - y0), cx: (ref.x0 + ref.x1) / 2, cz: (ref.z0 + ref.z1) / 2 };
+  var ref = sl[wide], top = y0 + (wide + 1) / N * (y1 - y0);
+  return { halfW: maxW / 2, top: top, cx: (ref.x0 + ref.x1) / 2, cz: (ref.z0 + ref.z1) / 2, face: COS._faceFit(pts, top) };
+};
+// Where the face is, for glasses and headphones: eye height (half way down the head), the front
+// surface there, the width of the face (front-most vertices only, so ears and fins don't count)
+// and the full width at that height (where headphone cups go)
+COS._faceFit = function(pts, top) {
+  var q = function(arr, f) { return arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * f)))]; }, num = function(a, b) { return a - b; };
+  var bot = q(pts.map(function(p) { return p.y; }).sort(num), 0.03), H = top - bot; if (H <= 1e-4) return null;
+  var ey = top - H * 0.48, band = pts.filter(function(p) { return Math.abs(p.y - ey) < H * 0.12; }); if (band.length < 12) return null;
+  var zs = band.map(function(p) { return p.z; }).sort(num), zf = q(zs, 0.97), zb = q(zs, 0.03);
+  var front = band.filter(function(p) { return p.z > zf - (zf - zb) * 0.35; }); if (front.length < 4) front = band;
+  var fx = front.map(function(p) { return p.x; }).sort(num), bx = band.map(function(p) { return p.x; }).sort(num);
+  return { ey: ey, zf: zf, zc: (zf + zb) / 2, fw: (q(fx, 0.97) - q(fx, 0.03)) / 2, fcx: (q(fx, 0.97) + q(fx, 0.03)) / 2, bw: (q(bx, 0.97) - q(bx, 0.03)) / 2, bcx: (q(bx, 0.97) + q(bx, 0.03)) / 2 };
+};
+// Hats that don't sit on the crown: glasses go on the eyes, headphones over the ears
+COS.HAT_ANCHOR = { hat_shades: "eyes", hat_phones: "ears" };
+COS._placeHat = function(hat, id, fit, size, at, qa, origin, ws) {
+  var F = fit && fit.face, an = COS.HAT_ANCHOR[id];
+  if (!F || !an) { hat.scale.setScalar(size / ws.x); return; }
+  if (an === "eyes") { var sz = Math.max(0.2, F.fw / 0.19); at.set(F.fcx, F.ey, F.zf).applyQuaternion(qa).add(origin); hat.scale.setScalar(sz / ws.x); }
+  else { var sx = Math.max(0.2, F.bw / 0.235), sy = Math.max(sx * 0.5, (fit.top - F.ey) / 0.235); at.set(F.bcx, F.ey, F.zc).applyQuaternion(qa).add(origin); hat.scale.set(sx / ws.x, sy / ws.x, sx / ws.x); }
+};
+// Pattern finishes are computed in the shader from the (skinned) vertex position in metres, so
+// they work on every model — most of these characters have no UVs to hang a texture on.
+COS._GLSL = [
+  "float cosH(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }",
+  "float cosN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+  "  return mix(mix(mix(cosH(i), cosH(i + vec3(1,0,0)), f.x), mix(cosH(i + vec3(0,1,0)), cosH(i + vec3(1,1,0)), f.x), f.y),",
+  "             mix(mix(cosH(i + vec3(0,0,1)), cosH(i + vec3(1,0,1)), f.x), mix(cosH(i + vec3(0,1,1)), cosH(i + vec3(1,1,1)), f.x), f.y), f.z); }"].join("\n");
+COS.PAT = {
+  fin_candy: { p: { roughness: 0.25, metalness: 0.05 }, col: "float s = smoothstep(0.46, 0.54, fract((vPat.y + vPat.x * 0.6 + vPat.z * 0.3) * 7.5)); diffuseColor.rgb = mix(vec3(1.0, 0.97, 0.96), vec3(0.9, 0.08, 0.2), s);" },
+  fin_marble: { p: { roughness: 0.3, metalness: 0.0 }, col: "float n = cosN(vPat * 4.0) * 0.65 + cosN(vPat * 11.0) * 0.35; float v = abs(sin((vPat.x + vPat.y * 0.7 + vPat.z * 0.3) * 9.0 + n * 8.0)); vec3 base = mix(vec3(0.86, 0.85, 0.84), vec3(0.98, 0.97, 0.95), cosN(vPat * 6.0)); diffuseColor.rgb = mix(vec3(0.3, 0.3, 0.36), base, smoothstep(0.02, 0.32, v));" },
+  fin_lava: { p: { roughness: 0.85, metalness: 0.0, color: 0x1a0e0c }, col: "", emi: "float n = cosN(vPat * 4.5 + vec3(0.0, -uT * 0.35, 0.0)); float c = 1.0 - smoothstep(0.0, 0.07, abs(n - 0.5)); totalEmissiveRadiance += vec3(1.0, 0.32, 0.04) * c * 2.6 + vec3(0.3, 0.06, 0.0) * n * n;", anim: true },
+  fin_toxic: { p: { roughness: 0.4, metalness: 0.1, color: 0x2a8a1a }, col: "", emi: "float b = smoothstep(0.55, 1.0, sin(vPat.y * 11.0 - uT * 4.0)); totalEmissiveRadiance += vec3(0.3, 1.0, 0.15) * (0.18 + b * 1.1) + vec3(0.6, 1.0, 0.2) * step(0.93, cosN(vPat * 9.0 + uT * 0.6)) * 0.8;", anim: true },
+  fin_galaxy: { p: { roughness: 0.35, metalness: 0.2 }, col: "diffuseColor.rgb = mix(vec3(0.04, 0.02, 0.16), vec3(0.32, 0.06, 0.42), cosN(vPat * 2.2 + 3.0));",
+    emi: "vec3 q = floor(vPat * 30.0); float st = step(0.982, cosH(q)); float tw = 0.55 + 0.45 * sin(uT * 3.0 + cosH(q + 1.7) * 30.0); totalEmissiveRadiance += vec3(1.0, 0.95, 1.0) * st * tw * 2.0 + vec3(0.12, 0.04, 0.3) * cosN(vPat * 3.0 + uT * 0.15);", anim: true },
+};
+COS._patMat = function(def, skinning, scale) {
+  var mat = new THREE.MeshStandardMaterial(Object.assign({ color: 0xffffff, skinning: skinning }, def.p)), uni = { uT: { value: 0 }, uS: { value: scale } };
+  mat.userData.uni = uni;
+  mat.onBeforeCompile = function(sh) {
+    sh.uniforms.uT = uni.uT; sh.uniforms.uS = uni.uS;
+    sh.vertexShader = "uniform float uS;\nvarying vec3 vPat;\n" + sh.vertexShader.replace("#include <skinning_vertex>", "#include <skinning_vertex>\n  vPat = transformed * uS;");
+    sh.fragmentShader = "uniform float uT;\nvarying vec3 vPat;\n" + COS._GLSL + "\n" + sh.fragmentShader
+      .replace("#include <color_fragment>", "#include <color_fragment>\n" + (def.col || ""))
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + (def.emi || ""));
+  };
+  var key = "cosPat" + Object.keys(COS.PAT).find(function(k) { return COS.PAT[k] === def; });
+  mat.customProgramCacheKey = function() { return key; };
+  return mat;
 };
 COS.applyFinish = function(glb, id) {
   glb.traverse(function(m) {
@@ -764,7 +1140,21 @@ COS.applyFinish = function(glb, id) {
     var src = Array.isArray(m.material) ? m.material[0] : m.material;
     var p = { map: src.map || null, skinning: !!src.skinning };
     var mat;
+    if (COS.PAT[id]) {
+      m.updateWorldMatrix(true, false);
+      var def = COS.PAT[id];
+      mat = COS._patMat(def, !!src.skinning, new THREE.Vector3().setFromMatrixScale(m.matrixWorld).x);
+      if (def.anim) (function(mat) { COS._anim.push({ o: m, f: function(o, t) { if (o.material !== mat) return false; mat.userData.uni.uT.value = t; } }); })(mat);
+      m.material = mat;
+      return;
+    }
+    if (id === "fin_pastel") {   // keep each material's own colours, washed out like sugar candy
+      var pas = function(mt) { var c = mt.clone(); if (c.color) { var hsl = {}; c.color.getHSL(hsl); c.color.setHSL(hsl.h, Math.min(1, hsl.s * 0.7 + 0.3), 0.62 + hsl.l * 0.25); } if (c.emissive) { c.emissive.copy(c.color).multiplyScalar(0.08); } if ("roughness" in c) c.roughness = 0.75; return c; };
+      m.material = Array.isArray(m.material) ? m.material.map(pas) : pas(m.material);
+      return;
+    }
     switch (id) {
+      case "fin_bronze": mat = new THREE.MeshStandardMaterial(Object.assign(p, { map: null, color: 0xb8743a, metalness: 1, roughness: 0.38 })); break;
       case "fin_gold": mat = new THREE.MeshStandardMaterial(Object.assign(p, { map: null, color: 0xffc83a, metalness: 1, roughness: 0.22 })); break;
       case "fin_chrome": mat = new THREE.MeshStandardMaterial(Object.assign(p, { map: null, color: 0xe8eef6, metalness: 1, roughness: 0.06 })); break;
       case "fin_shadow": mat = new THREE.MeshStandardMaterial(Object.assign(p, { map: null, color: 0x08080c, roughness: 0.9, emissive: new THREE.Color(0x2a0a4a), emissiveIntensity: 0.6 })); break;
@@ -773,7 +1163,7 @@ COS.applyFinish = function(glb, id) {
       case "fin_ghost": mat = new THREE.MeshStandardMaterial(Object.assign(p, { color: 0xd8e8ff, transparent: true, opacity: 0.42, depthWrite: false, emissive: new THREE.Color(0x6a8aff), emissiveIntensity: 0.5 })); break;
       case "fin_rainbow":
         mat = new THREE.MeshStandardMaterial(Object.assign(p, { map: null, color: 0xff0000, metalness: 0.3, roughness: 0.3, emissive: new THREE.Color(0xff0000), emissiveIntensity: 0.35 }));
-        COS._anim.push({ o: m, f: function(o, t) { var c = new THREE.Color().setHSL((t * 0.25 + o.id * 0.07) % 1, 0.9, 0.55); o.material.color.copy(c); o.material.emissive.copy(c); } });
+        (function(mat) { COS._anim.push({ o: m, f: function(o, t) { if (o.material !== mat) return false; var c = new THREE.Color().setHSL((t * 0.25 + o.id * 0.07) % 1, 0.9, 0.55); mat.color.copy(c); mat.emissive.copy(c); } }); })(mat);   // stops once the finish is taken off
         break;
       default: return;
     }
@@ -785,7 +1175,7 @@ COS.tick = function(t) {
     var a = COS._anim[i], live = false;
     for (var p = a.o; p; p = p.parent) if (p.isScene) { live = true; break; }
     if (!a.o.parent) { COS._anim.splice(i, 1); continue; }
-    if (live) a.f(a.o, t);
+    if (live && a.f(a.o, t) === false) COS._anim.splice(i, 1);   // false = done (e.g. a finish that was taken off)
   }
 };
 

@@ -60,7 +60,7 @@ ENT.add = function(o) {
 
 // Swap a procedural placeholder for a GLB, scaled to a height; returns the wrapper
 ENT.glb = function(key, height, placeholder, onLoad) {
-  var g = new THREE.Group(); g.userData.glbWrapper = true;
+  var g = new THREE.Group(); g.userData.glbWrapper = true; g.userData.glbKey = key;
   if (placeholder && !placeholder.isObject3D) placeholder = placeholder.mesh || null;   // legacy builders return {mesh, r, h}
   if (placeholder) g.add(placeholder);
   if (typeof loadModel === "function" && MODEL_OVERRIDES[key]) {
@@ -73,6 +73,7 @@ ENT.glb = function(key, height, placeholder, onLoad) {
       g.add(m);
       if (m.userData.mixer) { g.userData.mixer = m.userData.mixer; g.userData.clipActions = m.userData.clipActions; g.userData.activeClipName = m.userData.activeClipName; }
       g.userData.glbLoaded = true;
+      if (m.userData.mixer && typeof TOON !== "undefined") TOON.dress(m);   // animated critters / people get the rim light
       if (onLoad) onLoad(g, m);
     });
   }
@@ -151,10 +152,14 @@ ENT.trySteal = function(o) {
   if (ENT.carrying || ENT.stealCD > 0 || !(phase === "WALKING" || phase === "LANDED")) return;
   if (Math.hypot(discPos.x - o.x, discPos.z - o.z) > 26) return;
   if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) < 5) return;
-  if (T - (ENT.landT || 0) < 3) return;                // give the player a head start
-  if (Math.random() > 0.004) return;
-  o.state = "steal"; ENT.stealCD = 18;
-  if (typeof _flashPrompt === "function") _flashPrompt("Hey! Something's after your disc!");
+  var goose = o.type === "goose" || o.type === "raptor";
+  if (T - (ENT.landT || 0) < (goose ? 1.2 : 3)) return;   // give the player a head start (geese don't)
+  if (Math.random() > (goose ? 0.025 : 0.004)) return;
+  o.state = "steal"; ENT.stealCD = goose ? 12 : 18;
+  if (o.type === "goose" && typeof GAD !== "undefined") GAD.honk(o, true);
+  if (o.type === "raptor") AudioEngine.sfx("roar", 0.4, new THREE.Vector3(o.x, o.y + 1, o.z));
+  if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) > 14 && typeof CINE !== "undefined") CINE.react(function() { return new THREE.Vector3(o.x, o.y + 0.5, o.z); }, o.type === "goose" ? "HONK! THIEF!" : "THIEF!", 3.2);
+  if (typeof _flashPrompt === "function") _flashPrompt(o.type === "raptor" ? "A raptor is going for your disc!" : goose ? "HONK! A goose is going for your disc!" : "Hey! Something's after your disc!");
 };
 ENT.B.thief = function(o, dt) {
   var sp = o.speed * 1.8 * dt;
@@ -357,6 +362,7 @@ ENT.B.ghost = function(o, dt) {
   var c = ENT.course(); o.y = Math.max(c.heightAt(o.x, o.z), o.y - dt * 2);
   o.lift = 0.6 + Math.sin(ENT.now * 1.7 + o.phase) * 0.3;
   o.knockNow = true; o.knockF = 5;
+  if (o.clips) ENT.play(o, d < 8 ? o.clips.run : o.clips.idle);
   if (o.fade) o.mesh.traverse(function(m) { if (m.material && m.material.transparent) m.material.opacity = 0.45 + Math.sin(T * 2 + o.phase) * 0.2; });
 };
 
@@ -366,6 +372,47 @@ ENT.B.ghost = function(o, dt) {
 // minions, socks, pencils, giant feet).
 // ══════════════════════════════════════════════════════════════════════════════
 ENT.M = {};
+// GLB stand-ins for the old hand-built creatures (Quaternius, CC0): the hand-built one shows until it loads
+ENT.GHOST_CLIPS = { walk: ["Flying_Idle"], run: ["Fast_Flying"], idle: ["Flying_Idle"] };
+ENT.ghostMesh = function() {
+  return ENT.glb("ghost_q", 2.0, ENT.M.ghost(), function(g, m) {
+    m.traverse(function(o) {
+      if (!o.isMesh) return;
+      var tw = function(mt) { var c = mt.clone(); c.transparent = true; c.opacity = 0.6; if (/main/i.test(mt.name)) { c.color.setHex(0xd8d0ff).convertSRGBToLinear(); c.emissive = new THREE.Color(0x3a2a6a); } c.metalness = 0; return c; };
+      o.material = Array.isArray(o.material) ? o.material.map(tw) : tw(o.material);
+    });
+  });
+};
+// castle guards: the skeleton character in the knight helm and a red cape
+ENT.knightMesh = function() {
+  return ENT.glb("skin_bones", 2.1, ENT.M.knight(), function(g) { if (typeof COS !== "undefined") COS.dressAvatar(g, { hat: "hat_knight", back: "back_cape" }); });
+};
+// Bats: circle overhead, every so often swoop at whoever is closest
+ENT.bats = function(many, n) {
+  many(n, function(p, z, i) {
+    ENT.add({ type: "bat", mesh: ENT.glb("bat", 0.7, new THREE.Group()), x: p.x, z: p.z, y: p.y + 5, r: 0.4, h: 0.7, update: ENT.B.bat, home: { x: p.x, z: p.z, R: 6 + srng() * 5 },
+      ang: srng() * 6.28, w: (srng() < 0.5 ? -1 : 1) * (0.5 + srng() * 0.4), alt: 4 + srng() * 3, swoop: 4 + srng() * 6, phase: i * 1.3, knock: 3, clips: { walk: ["Flying"], run: ["Flying"], idle: ["Flying"] } });
+  });
+};
+ENT.B.bat = function(o, dt) {
+  var c = ENT.course(); if (!c) return;
+  o.swoop -= dt;
+  var tg = ENT.target(o), sw = o.swoop < 0 && tg.d < 14;
+  if (sw) {   // dive at the player's head, then climb back out
+    var dx = tg.x - o.x, dz = tg.z - o.z, d = Math.hypot(dx, dz) || 1, sp = 7 * dt;
+    o.x += dx / d * sp; o.z += dz / d * sp; ENT.face(o, dx, dz, dt, 8);
+    o.y += ((c.heightAt(o.x, o.z) + 1.5) - o.y) * Math.min(1, dt * 3);
+    if (d < 1 || o.swoop < -2.5) { o.swoop = 6 + Math.random() * 6; }
+  } else {
+    o.ang += o.w * dt;
+    var tx = o.home.x + Math.cos(o.ang) * o.home.R, tz = o.home.z + Math.sin(o.ang) * o.home.R;
+    ENT.face(o, tx - o.x, tz - o.z, dt, 5);
+    o.x += (tx - o.x) * Math.min(1, dt * 2); o.z += (tz - o.z) * Math.min(1, dt * 2);
+    o.y += ((c.heightAt(o.x, o.z) + o.alt + Math.sin(ENT.now * 1.7 + o.phase) * 0.6) - o.y) * Math.min(1, dt * 1.5);
+  }
+  o.lift = 0; o.knockNow = sw; o.moving = true;
+  if (o.clips) ENT.play(o, o.clips.walk);
+};
 function _mesh(geo, mat, x, y, z, parent) { var m = new THREE.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); m.castShadow = true; m.receiveShadow = true; if (parent) parent.add(m); return m; }
 
 ENT.M.minion = function(oneEye) {
@@ -762,7 +809,7 @@ ENT.spawnAll = function(h, spawns, idx) {
   spawns.forEach(function(s) {
     var y = s.y !== undefined ? s.y : c.heightAt(s.x || 0, s.z || 0);
     if (s.kind === "tree") tree({ x: s.x, z: s.z, y: y }, "tree", 5.5, 0.5);
-    else if (s.kind === "bench") prop({ x: s.x, z: s.z, y: y }, ENT.M.bench(), 0.8, 0.9);
+    else if (s.kind === "bench") prop({ x: s.x, z: s.z, y: y }, ENT.glb("prop_bench", 1.0, ENT.M.bench()), 0.8, 0.9);
     else if (s.kind === "streetlamp") prop({ x: s.x, z: s.z, y: y }, ENT.M.lamp(true), 0.15, 5);
     else if (s.kind === "parked") prop({ x: s.x, z: s.z, y: y }, ENT.glb("car", 1.5, new THREE.Group()), 1.1, 1.5, { yaw: 0, solid: true });
     else if (s.kind === "chair") prop({ x: s.x, z: s.z, y: y }, ENT.M.chair(), 0.35, 1.1, { yaw: s.rot + Math.PI });
@@ -779,7 +826,7 @@ ENT.spawnAll = function(h, spawns, idx) {
     case "minion": many(n0 * 1.4, minion); break;
     case "emote": many(n0, function(p, z, i) { var keys = ["skin_man", "skin_casual", "skin_punk", "skin_hoodie", "skin_beach", "skin_dress"]; ENT.add({ type: "dancer", mesh: ENT.M.npc(keys[i % keys.length]), x: p.x, z: p.z, y: p.y, r: 0.4, h: 1.75, update: ENT.B.dancer, bounce: 0.15, spinOnBar: i % 2 === 0, clips: { a: ["Jump"], b: ["Sprint", "Run", "Walk"] }, knock: 3, yaw: srng() * 6 }); }); many(3, function(p) { prop(p, ENT.glb("arrow", 2.4, new THREE.Group()), 0.3, 2.4, { update: ENT.B.floater, spinRate: 0.6 }); }); break;
     case "public_poo": many(n0 * 0.6, function(p) { prop(p, typeof buildToilet === "function" ? buildToilet() : new THREE.Group(), 0.6, 1.2, { sway: 4 }); }); many(n0 * 0.5, function(p, z) { wanderer(p, z, typeof buildPoo === "function" ? buildPoo() : new THREE.Group(), { speed: 0.8, hop: 7, hopH: 0.35, r: 0.5, h: 0.8, knock: 3 }); }); break;
-    case "eerie": many(n0 * 0.5, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.M.ghost(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i * 1.7, fade: true }); }); many(n0 * 0.5, function(p) { tree(p, "tree", 5, 0.4); }); break;
+    case "eerie": many(n0 * 0.5, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.ghostMesh(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i * 1.7, fade: true, clips: ENT.GHOST_CLIPS }); }); ENT.bats(many, n0 * 0.35); many(n0 * 0.5, function(p) { tree(p, "tree", 5, 0.4); }); break;
     case "terrifying": case "screaming_mamamia":
       many(n0 * 0.45, function(p, z, i) { var gm = ENT.M.geyser(); ENT.add({ type: "geyser", mesh: gm.root, pool: gm.pool, col: gm.col, x: p.x, z: p.z, y: p.y + 0.02, r: 1.2, h: 7, update: ENT.B.geyser, freq: R(0.16, 0.24), phase: srng(), solid: false }); });
       many(n0 * 0.3, function(p) { prop(p, ENT.glb("spike", 1.6, typeof buildChaosSpike === "function" ? buildChaosSpike() : new THREE.Group()), 0.6, 1.6, { knock: 6 }); });
@@ -789,9 +836,9 @@ ENT.spawnAll = function(h, spawns, idx) {
     // ── Highlands ──
     case "mountains": many(n0 * 1.2, function(p) { tree(p, "pinetree", R(5, 8), 0.45); }); many(n0 * 0.5, function(p) { prop(p, ENT.glb("rock", R(1, 2.2), new THREE.Group()), 1, 1.6); }); if (idx >= 2) rollerAcross(1 + idx * 0.15, function() { return ENT.M.boulder(0.9); }, 3.2, 0.9); break;
     case "winter": many(n0 * 0.9, function(p) { tree(p, "xmastree", R(3.5, 6), 0.5); }); many(n0 * 0.5, function(p) { prop(p, ENT.M.snowman(), 0.6, 2.9); }); many(n0 * 0.7, function(p, z) { wanderer(p, z, ENT.M.penguin(), { speed: 1.1, flee: 4, waddle: 12, r: 0.35, h: 1.2 }); }); if (idx >= 3) rollerAcross(1, function() { var b = ENT.M.boulder(0.8); b.spin.children[0].material = ENT.mat(0xf6f9ff, { roughness: 0.8 }); return b; }, 2.6, 0.8); break;
-    case "grandcanyon": many(n0 * 0.8, function(p) { prop(p, ENT.M.cactus(), 0.4, 3.4, { knock: 4 }); }); many(n0 * 0.4, function(p) { prop(p, ENT.glb("rock", R(1, 2.5), new THREE.Group()), 1, 1.8); }); rollerAcross(1 + idx * 0.2, ENT.M.tumbleweed, 4.2, 0.6); break;
+    case "grandcanyon": many(n0 * 0.8, function(p) { prop(p, ENT.glb("prop_cactus", 3.4, ENT.M.cactus()), 0.4, 3.4, { knock: 4 }); }); many(n0 * 0.4, function(p) { prop(p, ENT.glb("rock", R(1, 2.5), new THREE.Group()), 1, 1.8); }); rollerAcross(1 + idx * 0.2, ENT.M.tumbleweed, 4.2, 0.6); break;
     case "waterfall": many(n0 * 1.1, function(p) { tree(p, "tree", R(5, 7), 0.5); }); many(n0 * 0.5, function(p) { prop(p, ENT.glb("rock", R(1, 2), new THREE.Group()), 1, 1.5); }); many(n0 * 0.3, chick); break;
-    case "village": many(n0 * 0.5, function(p, z, i) { var off = 14 + srng() * 6, sp = { x: p.x + (srng() < 0.5 ? -off : off), z: p.z }; sp.y = c.heightAt(sp.x, sp.z); if (sp.y > c.hazard.level + 0.5) prop(sp, ENT.M.house(LV.pick([0xf0e6d0, 0xe8d0b8, 0xd8e4f0, 0xf4e8a8])), 3, 5.5, { yaw: Math.atan2(p.x - sp.x, p.z - sp.z) }); }); many(n0, chick); many(n0 * 0.4, rooster); many(n0 * 0.5, function(p) { tree(p, "tree", R(5, 7), 0.5); }); ENT.routeLanes(c, 1, function(lane) { ENT.add({ type: "tractor", mesh: ENT.glb("tractor", 2.4, typeof buildTractor === "function" ? buildTractor() : new THREE.Group()), x: lane.x0, z: lane.z0, r: 1.3, h: 2.4, speed: 2.2, update: ENT.B.lane, lane: lane, polite: true, honk: true, knock: 7 }); }); break;
+    case "village": many(n0 * 0.5, function(p, z, i) { var off = 14 + srng() * 6, sp = { x: p.x + (srng() < 0.5 ? -off : off), z: p.z }; sp.y = c.heightAt(sp.x, sp.z); if (sp.y > c.hazard.level + 0.5) prop(sp, ENT.glb("prop_cottage", 5.5, ENT.M.house(LV.pick([0xf0e6d0, 0xe8d0b8, 0xd8e4f0, 0xf4e8a8]))), 3, 5.5, { yaw: Math.atan2(p.x - sp.x, p.z - sp.z) }); }); many(n0, chick); many(n0 * 0.4, rooster); many(n0 * 0.5, function(p) { tree(p, "tree", R(5, 7), 0.5); }); ENT.routeLanes(c, 1, function(lane) { ENT.add({ type: "tractor", mesh: ENT.glb("tractor", 2.4, typeof buildTractor === "function" ? buildTractor() : new THREE.Group()), x: lane.x0, z: lane.z0, r: 1.3, h: 2.4, speed: 2.2, update: ENT.B.lane, lane: lane, polite: true, honk: true, knock: 7 }); }); break;
     case "vetschool": many(n0 * 0.9, dog); many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.glb("animated_woman", 1.75, new THREE.Group()), { speed: 1.1, r: 0.4, h: 1.75, clips: { walk: ["Walking"], run: ["Running"], idle: ["Idle"] }, knock: 3, canSteal: false, carFan: true }); }); many(n0 * 0.3, rooster); break;
     case "cabbage": many(n0 * 2, function(p) { prop(p, ENT.glb("cabbage", R(0.8, 1.6), typeof buildCabbage === "function" ? buildCabbage() : new THREE.Group()), 0.5, 1); }); many(n0 * 0.6, bunny); ENT.routeLanes(c, 1, function(lane) { ENT.add({ type: "tractor", mesh: ENT.glb("tractor", 2.4, typeof buildTractor === "function" ? buildTractor() : new THREE.Group()), x: lane.x0, z: lane.z0, r: 1.3, h: 2.4, speed: 2.4, update: ENT.B.lane, lane: lane, polite: true, honk: true, knock: 7 }); }); break;
     case "feet_bunnies": many(n0 * 0.8, bunny); for (var fi = 0; fi < Math.round((1 + idx * 0.25) * dens); fi++) { var fz = zones[Math.floor(srng() * zones.length)], fp = fz && spot(fz, 8); if (!fp) continue; var fm = ENT.M.foot(); var fe = ENT.add({ type: "foot", mesh: new THREE.Group(), foot: fm.root, shadow: fm.shadow, x: fp.x, z: fp.z, y: fp.y, r: 1.6, h: 2, update: ENT.B.stomper, freq: R(0.18, 0.28), phase: srng(), knock: 9, knockUp: 6 }); fe.mesh.add(fm.root); fe.mesh.add(fm.shadow); } break;
@@ -824,16 +871,18 @@ ENT.spawnAll = function(h, spawns, idx) {
     case "minecraft": many(n0 * 0.35, function(p, z) { ENT.add({ type: "creeper", mesh: ENT.M.creeper(), x: p.x, z: p.z, y: p.y, r: 0.4, h: 1.65, speed: 1.6, update: ENT.B.creeper, home: { x: p.x, z: p.z, R: 10 }, maxStep: 1.1, fuse: 0 }); }); many(n0 * 0.6, function(p, z) { wanderer(p, z, ENT.M.pig(), { speed: 0.9, r: 0.45, h: 0.9, maxStep: 1.1, flee: 3 }); }); many(n0 * 0.5, chick); break;
     case "skyblock": many(n0 * 0.5, chick); many(2, function(p) { prop(p, ENT.glb("sb_crate", 1, new THREE.Group()), 0.6, 1); }); break;
     case "geometry_dash": break;
+    case "bouncy": ENT.bouncy(c, spawns, idx, dens); break;
+    case "jungle": ENT.jungle(c, zones, idx, dens, spot); break;
     // ── Moon ──
     case "moon":
       many(n0 * 0.6, function(p) { prop(p, ENT.glb("moonrock", R(0.8, 2.2), new THREE.Group()), 0.9, 1.4); });
-      many(1, function(p) { prop(p, ENT.M.lander(), 2.2, 4); });
+      many(1, function(p) { prop(p, ENT.glb("prop_lander", 4, ENT.M.lander()), 2.2, 4); });
       many(2, function(p) { prop(p, ENT.M.flag(), 0.1, 2.6, { solid: false }); });
-      ENT.routeLanes(c, 1 + Math.floor(idx / 4), function(lane) { var rv = ENT.M.rover(); ENT.add({ type: "rover", mesh: rv, wheels: rv.userData.wheels, x: lane.x0, z: lane.z0, r: 1.3, h: 2, speed: 2.4, update: ENT.B.lane, lane: lane, polite: true, knock: 8 }); });
+      ENT.routeLanes(c, 1 + Math.floor(idx / 4), function(lane) { var rv0 = ENT.M.rover(), rv = ENT.glb("prop_rover", 2.2, rv0); ENT.add({ type: "rover", mesh: rv, wheels: rv0.userData.wheels, x: lane.x0, z: lane.z0, r: 1.3, h: 2, speed: 2.4, update: ENT.B.lane, lane: lane, polite: true, knock: 8 }); });
       many(n0 * 0.3, function(p, z, i) { var keys = ["skin_farmer", "skin_worker", "skin_casual"]; wanderer(p, z, ENT.M.npc(keys[i % 3]), { speed: 1, r: 0.4, h: 1.75, hop: 2.4, hopH: 1.2, clips: { walk: ["Walk"], run: ["Sprint", "Run"], idle: ["Idle"] } }); });
       break;
     // ── Castle ──
-    case "hogwarts": many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.M.knight(), { type: "knight", speed: 0.9, r: 0.45, h: 2.2, knock: 5, chase: 6 }); }); many(n0 * 0.3, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.M.ghost(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i, fade: true }); }); break;
+    case "hogwarts": many(n0 * 0.5, function(p, z) { wanderer(p, z, ENT.knightMesh(), { type: "knight", speed: 0.9, r: 0.45, h: 2.2, knock: 5, chase: 6, clips: { walk: ["Walk"], run: ["Run"], idle: ["Idle"] } }); }); many(n0 * 0.3, function(p, z, i) { ENT.add({ type: "ghost", mesh: ENT.ghostMesh(), x: p.x, z: p.z, y: p.y, r: 0.6, h: 2.2, speed: 1, update: ENT.B.ghost, home: { x: z.x, z: z.z, R: z.r + 6 }, phase: i, fade: true, clips: ENT.GHOST_CLIPS }); }); ENT.bats(many, n0 * 0.25); break;
   }
   // Always put a couple of thieves on the course when the Mischief mod is active
   if (steal && !ENT.list.some(function(o) { return o.canSteal; })) many(2, function(p, z) { wanderer(p, z, ENT.glb("chick", 0.7, ENT.M.pig()), { speed: 1.6, r: 0.35, h: 0.7, canSteal: true, clips: { walk: ["Run"], run: ["Run"], idle: ["Idle_Peck", "Idle"] } }); });
@@ -852,6 +901,7 @@ ENT.zones = function(c, spawns) {
     else if (s.kind === "skyblock") s.isl.forEach(function(I, i) { if (i > 0) z.push({ x: I.x, z: I.z, r: I.r - 1 }); });
     else if (s.kind === "castle") s.plats.forEach(function(P, i) { if (i > 0) z.push({ x: P.x, z: P.z, r: Math.min(P.w, P.d) / 2 - 1 }); });
     else if (s.kind === "club") s.plats.forEach(function(P, i) { if (i > 0) z.push({ x: P.x, z: P.z, r: P.size / 2 - 1.2 }); });
+    else if (s.kind === "bouncy") s.decks.forEach(function(D, i) { if (i > 0) z.push({ x: D.x, z: D.z, r: D.size / 2 - 2 }); });
     else if (s.kind === "sidewalks") { for (var u = 0.1; u < 0.95; u += 0.12) { var q = LV.pointAt(s.pts, u); z.push({ x: q.x, z: q.z, r: 6 }); } }
   });
   if (!z.length) c.route.forEach(function(p) { z.push({ x: p.x, z: p.z, r: 6 }); });
@@ -934,7 +984,7 @@ ENT.club = function(c, spawns, idx, dens, th) {
 // Creatures with AI (random choices, reacting to players) are simulated by the host
 // only; everyone else follows the host's stream. Timed hazards run on the shared
 // clock everywhere, so they line up without any network traffic.
-ENT.isAI = function(o) { var u = o.update; return u === ENT.B.wander || u === ENT.B.lane || u === ENT.B.roller || u === ENT.B.vortex || u === ENT.B.creeper || u === ENT.B.ghost; };
+ENT.isAI = function(o) { var u = o.update; return u === ENT.B.wander || u === ENT.B.goose || u === ENT.B.trex || u === ENT.B.raptor || u === ENT.B.lane || u === ENT.B.roller || u === ENT.B.vortex || u === ENT.B.creeper || u === ENT.B.ghost; };
 ENT._sendAcc = 0;
 ENT.update = function(dt) {
   ENT.now = typeof netTime === "function" ? netTime() : T;
@@ -943,8 +993,15 @@ ENT.update = function(dt) {
   for (var i = 0; i < ENT.list.length; i++) {
     var o = ENT.list[i];
     o.t += dt;
+    if (o.animFn) o.animFn(o, dt);   // procedural creatures animate from how they move (host and guests alike)
     if (!o.update) continue;
     if (o.seatedCar || o.toCar) continue;      // riding in / running to a car: the car logic moves them
+    if (o.rag) {   // limp: physics owns the body, the collider follows the pelvis
+      var pv = RAG.pelvis(o.mesh);
+      if (pv) { o._ragP = pv.clone(); o.x = pv.x; o.z = pv.z; o.worldY = pv.y - 0.9; continue; }
+      if (RAG.get(o.mesh)) continue;
+      o.rag = false;
+    }
     if (o.fly && !(guest && ENT.isAI(o))) { ENT.flyStep(o, dt); continue; }
     if (guest && ENT.isAI(o)) { ENT.follow(o, dt); continue; }
     try { o.update(o, dt); }
@@ -995,7 +1052,19 @@ ENT.update = function(dt) {
   }
 };
 // Knocked flying (bat, poop army): ballistic arc, tumbling, then back to normal
-ENT.launch = function(o, vx, vy, vz) { o.fly = { vx: vx, vy: vy, vz: vz }; if (o.state) { if (ENT.carrying === o) ENT.dropDisc(o, true); o.state = null; } };
+ENT.launch = function(o, vx, vy, vz) {
+  if (o.state) { if (ENT.carrying === o) ENT.dropDisc(o, true); o.state = null; }
+  if (ENT.ragdoll(o, vx, vy, vz)) return;          // people go limp …
+  o.fly = { vx: vx, vy: vy, vz: vz };              // … critters tumble through the air
+};
+// Humanoid NPCs (joggers, dancers, knights …) ragdoll when hit: their AI pauses until they get up
+ENT.ragdoll = function(o, vx, vy, vz) {
+  if (typeof RAG === "undefined" || !o.mesh || o.rag || !RAG.can(o.mesh)) return false;
+  var ok = RAG.start(o.mesh, { vel: [vx, vy, vz], hit: [vx * 0.4, vy * 0.3, vz * 0.4], kind: "ko", minT: 1.4, maxT: 6,
+    onEnd: function(yaw) { o.rag = false; var p = o._ragP; if (p) { o.x = p.x; o.z = p.z; o.y = ENT.course().heightAt(o.x, o.z); } o.yaw = yaw; ENT.sync(o); } });
+  if (ok) { o.rag = true; o.moving = false; o.knockNow = false; }
+  return ok;
+};
 ENT.flyStep = function(o, dt) {
   var f = o.fly, c = ENT.course();
   f.vy -= 22 * dt; o.x += f.vx * dt; o.y += f.vy * dt; o.z += f.vz * dt;
@@ -1055,6 +1124,14 @@ ENT.collidePlayer = function(p, pl) {
     if (d >= R) continue;
     var nx = d > 1e-4 ? dx / d : 1, nz = d > 1e-4 ? dz / d : 0;
     if (o.deadly) { pl.fall("void"); AudioEngine.sfx("zap"); return; }
+    // full sprint into something knee-high (rocks, cabbages, chickens…): faceplant
+    if (o.solid && o.h < 2.2 && !/tree|car|pole|booth|lamp/.test(o.type) && pl.onGround && !(pl._tripCD > T) && typeof RAG !== "undefined" && !RAG.busy()) {
+      var into = -(pl.vel.x * nx + pl.vel.z * nz);
+      if (into > 5.6 && Math.hypot(pl.vel.x, pl.vel.z) > 6.2 && RAG.startLocal("trip", pl.vel.clone().setY(1.5), new THREE.Vector3(-nx * 3, 2.2, -nz * 3), 0.9)) {
+        pl._tripCD = T + 4; if (o.update === ENT.B.wander) ENT.launch(o, -nx * 4, 5, -nz * 4);
+        return;
+      }
+    }
     if ((o.knock || o.knockNow) && o.knockCD <= 0 && (o.knockNow || o.moving || o.knock > 5)) {
       o.knockCD = 1.0;
       pl.knock(nx, nz, o.knockF || o.knock || 6, o.knockUp || 4.5);

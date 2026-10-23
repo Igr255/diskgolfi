@@ -37,6 +37,7 @@ WORLD.PAL = {
   eerie:       { g1: 0x2a3a2a, g2: 0x3a4630, rock: 0x3a3840, snow: 0xffffff, sand: 0x5a5448, snowY: 999, rockLo: 0.38 },
   tornado:     { g1: 0x3a4a34, g2: 0x4a5a3a, rock: 0x4a4a4a, snow: 0xffffff, sand: 0x6a6450, snowY: 999, rockLo: 0.38 },
   hogwarts:    { g1: 0x34522e, g2: 0x4a6a3a, rock: 0x5a5650, snow: 0xdfe6f0, snowY: 60, strata: 0.3, rockLo: 0.32 },
+  jungle:      { g1: 0x1e5a16, g2: 0x3a7a22, rock: 0x5a4a3a, snow: 0xffffff, sand: 0xb89a60, snowY: 999, strata: 0.3, rockLo: 0.36 },
 };
 WORLD.pal = function(theme) {
   if (WORLD.PAL[theme]) return WORLD.PAL[theme];
@@ -335,6 +336,7 @@ WORLD.forest = function(ctx) {
   else if (th === "winter") types = [["snowpine", 1]];
   else if (th === "grandcanyon") types = [["cactus", 1]];
   else if (/eerie|terrifying|screaming/.test(th)) types = [["dead", 1]];
+  else if (th === "jungle") types = [["palm", 0.45], ["broad", 0.55]];
   else if (kind === "islands" && /funny|minion|emote|public_poo/.test(th)) types = [["palm", 0.75], ["broad", 0.25]];
   else types = [["broad", 0.75], ["pine", 0.25]];
   var C = ctx.C, b = C.bounds, H = ctx.H, rnd = ctx.rnd, W = ctx.W;
@@ -360,6 +362,9 @@ WORLD.forest = function(ctx) {
     var tmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
     if (t[0] !== "rock" && t[0] !== "block") GFX.addSway(tmat, t[0] === "palm" ? 0.35 : 0.22, t[0] === "palm" ? 7 : 8);
     var mesh = new THREE.InstancedMesh(WORLD.treeGeometry(t[0]), tmat, L.length);
+    // the real (Quaternius) palm once it's loaded — ~3k triangles each, so only for small backdrop groves
+    // (a jungle horizon of 800 palms stays low-poly; it's all fog out there anyway)
+    if (t[0] === "palm" && L.length <= 160 && typeof JUNGLE !== "undefined") JUNGLE._plant(L.length % 2 ? "palm" : "palm2", function(P) { mesh.geometry = P.geo; mesh.material = P.mat; });
     var col = new THREE.Color();
     L.forEach(function(mm, k) { mesh.setMatrixAt(k, mm); var v = 0.82 + rnd() * 0.3; col.setRGB(v, v * (0.95 + rnd() * 0.1), v * 0.92); mesh.setColorAt(k, col); });
     mesh.instanceMatrix.needsUpdate = true; mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.userData.noBatch = true;
@@ -455,6 +460,7 @@ WORLD.landSpots = function(ctx, n, rMin, rMax, minH) {
 // Each world's signature landmarks, now standing on real land
 WORLD.landmarks = function(ctx) {
   var th = ctx.h.theme, g = ctx.g, W = ctx.W, M = function(c, o) { var p = { color: c, roughness: 0.8 }; for (var k in o || {}) p[k] = o[k]; return new THREE.MeshStandardMaterial(p); };
+  if (th === "jungle" && typeof JUNGLE !== "undefined") JUNGLE.volcano(ctx);   // levels5.js
   if (th === "funny") {
     ["#ff5a5a", "#ffa83a", "#ffe14a", "#6ae05a", "#3ab0ff", "#8a6aff"].forEach(function(col, ri) {
       var arc = new THREE.Mesh(new THREE.TorusGeometry(260 - ri * 8, 4, 6, 72, Math.PI), new THREE.MeshBasicMaterial({ color: new THREE.Color(col), transparent: true, opacity: 0.28, depthWrite: false, fog: false }));

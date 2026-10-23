@@ -104,6 +104,8 @@ function buildPlayerAvatar(playerIdx, color) {
           var _cos = (typeof myIdx !== "undefined" && playerIdx === myIdx && !g.userData.remote) ? COS.equipped() : ((window._remoteCos || {})[playerIdx] || null);
           COS.dressAvatar(g, _cos);
         }
+        if (typeof ANIM !== "undefined") ANIM.goofy(g);   // bobblehead proportions (after the hat is fitted)
+        if (typeof TOON !== "undefined") TOON.dress(glb);  // rim light
         // Mixer stays in _glbMixers — updated once per frame by game.js animate loop.
         // Do NOT remove it. The global forEach is the single update path (same as lobby).
       });
@@ -165,17 +167,17 @@ function switchAvatarAnim(avatarGroup, animName) {
   if (actions[resolved]) {
     actionKey = resolved;
   } else {
-    var lo2 = resolved.toLowerCase();
+    var lo2 = resolved.toLowerCase(), last = lo2.split('|').pop();
     var ks = Object.keys(actions);
-    for (var ki = 0; ki < ks.length; ki++) {
-      if (ks[ki].toLowerCase() === lo2 || ks[ki].toLowerCase().indexOf(lo2.split('|').pop()) >= 0) {
-        actionKey = ks[ki]; break;
-      }
-    }
+    // an exact clip name ("…|Jump") beats one that merely contains it ("…|Jump_Idle")
+    actionKey = ks.find(function(k) { var kl = k.toLowerCase(); return kl === lo2 || kl.split('|').pop() === last; }) ||
+                ks.find(function(k) { return k.toLowerCase().indexOf(last) >= 0; }) || null;
   }
   if (!actionKey) {
     // Other rigs name their clips differently (Running, Walking, Gallop …)
-    var alias = { Sprint: ["running", "run", "gallop"], Walk: ["walking", "walk"], Grounded: ["idle"], Jump: ["jump", "run"], Idle: ["idle"], sit: ["sitidle", "sitting", "idle"], death: ["death", "die", "hitrecieve", "jump"], roll: ["roll", "jump"] }[resolved] || [];
+    var alias = { Sprint: ["running", "run", "gallop"], Walk: ["walking", "walk"], Grounded: ["idle"], Jump: ["jump", "run"], Idle: ["idle"], sit: ["sitidle", "sitting", "idle"], death: ["death", "die", "hitrecieve", "jump"], roll: ["roll", "jump"],
+      throwwind: ["throwwind", "idle"], throwrelease: ["throwrelease", "punch_right", "punch"], cheer: ["cheer", "wave", "jump"], dance: ["dance", "cheer", "wave"],
+      clap: ["clap", "clapping", "wave"], wave: ["wave", "cheer", "jump"], taunt: ["taunt", "punch", "wave"] }[resolved] || [];
     var ks2 = Object.keys(actions);
     // exact clip names first ("Run", "Man_Run"), only then partial matches ("RunningJump" must not win over "Run")
     var seg = function(k) { return k.toLowerCase().split("|").pop(); };
@@ -189,7 +191,7 @@ function switchAvatarAnim(avatarGroup, animName) {
 
   var fromAction = current ? actions[current] : null;
   var toAction   = actions[actionKey];
-  var once = resolved === "Jump" || resolved === "Grounded" || resolved === "death" || resolved === "roll";
+  var once = resolved === "Jump" || resolved === "Grounded" || resolved === "death" || resolved === "roll" || resolved === "throwwind" || resolved === "throwrelease";
   toAction.reset().setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity).play().fadeIn(once ? 0.08 : 0.18);
   toAction.clampWhenFinished = once;
   if (fromAction) fromAction.fadeOut(0.18);
@@ -343,7 +345,9 @@ function buildDisc(type, opacity = 1, skinId) {
   var skinShape = skin ? (skin.shape || null) : null;
   const m = buildDiscMat(skinColor, opacity, isMetal, skinGlow);
 
-  if (typeof COS !== "undefined" && COS.buildDiscBody(g, skin, d, opacity, skinColor)) {
+  if (d.arcade && !(skin && (skin.shape || skin.pattern)) && typeof ARS !== "undefined" && ARS.buildBody(g, type, opacity)) {
+    // trick discs look like their trick (arsenal.js)
+  } else if (typeof COS !== "undefined" && COS.buildDiscBody(g, skin, d, opacity, skinColor)) {
     // painted pattern or one of the themed shapes (cosmetics.js)
   } else if (skinShape === "pizza") {
     const crust = new THREE.MeshStandardMaterial({ color: 0xd8a050, roughness: 0.85 });
@@ -486,6 +490,7 @@ function updateTrajDots(startPos, startVel) {
     if (landed || i >= maxDots) continue;
     for (let s = 0; s < SUB && !landed; s++) {
       _discAero(_trajV, selectedDisc, dt, _trajBank, true);
+      if (typeof GAD !== "undefined") GAD.previewForce(_trajP, _trajV, dt);
       _trajP.addScaledVector(_trajV, dt);
       const g = terrainY(_trajP.x, _trajP.z, h, holeIdx);
       if (_trajP.y <= g + 0.06) {
@@ -508,10 +513,12 @@ function _discAero(vel, discType, dt, bankArr, preview) {
   const d   = DISCS[discType] || DISCS.driver;
   const spd = vel.length();
   const _h  = HOLES[holeIdx];
+  const _mod = typeof FEEL === "undefined" ? null : (preview ? (typeof PU !== "undefined" && PU.modNext) : FEEL.mod);
+  const _hv = _mod === "heavy" || !!d.heavy;   // anvil item or the Anvil disc
 
   // Drag (disc's own + weather; speed boost powerup halves drag)
   const boost = activePowerups.speed && Date.now() < activePowerups.speed.until;
-  const naturalDrag = 1.0 - (1.0 - d.drag) * dt * (boost ? 0.45 : 1.0);
+  const naturalDrag = 1.0 - (1.0 - d.drag) * dt * (boost ? 0.45 : 1.0) * (_hv ? 0.45 : 1.0);
   const weatherDrag = Math.max(0, 1.0 - getWeatherDragAdd() * dt * spd * 0.5);
   vel.x *= naturalDrag * weatherDrag;
   vel.z *= naturalDrag * weatherDrag;
@@ -525,7 +532,7 @@ function _discAero(vel, discType, dt, bankArr, preview) {
   // Lift — tilted by the bank angle
   const wLift = getWeatherLiftMult();
   const bank  = bankArr ? bankArr[0] : 0;
-  const liftForce = Math.min(spd * spd * d.lift * wLift, (gravG + Math.max(0, wGravAdd)) * 0.95);
+  const liftForce = Math.min(spd * spd * d.lift * wLift, (gravG + Math.max(0, wGravAdd)) * 0.95) * (_hv ? 0.35 : 1);
   vel.y += liftForce * Math.cos(bank) * dt;
 
   // Turn (high speed, to the right) and fade (low speed, to the left) — perpendicular to travel
@@ -533,7 +540,7 @@ function _discAero(vel, discType, dt, bankArr, preview) {
   const rx = -vel.z / hs, rz = vel.x / hs;   // unit vector to the thrower's right
   const turnDir = discType === "vilov" ? -1 : 1;
   if (spd > 8) {
-    const tf = (d.turn / d.stability) * dt * spd * 0.1 * turnDir;
+    const tf = (d.turn / d.stability) * dt * spd * 0.1 * turnDir * (_hv ? 0.4 : 1);
     vel.x += rx * tf; vel.z += rz * tf;
   } else {
     const fs = d.fade * d.stability * dt * spd * 0.15 * turnDir;
@@ -551,7 +558,7 @@ function _discAero(vel, discType, dt, bankArr, preview) {
   if (spd < 12 && vel.y < 0) vel.y += d.glide * 0.5 * dt;
 
   // Wind (steady) + gusts (live flight only — the preview can't predict gusts)
-  const wWind  = getWeatherWindMult();
+  const wWind  = getWeatherWindMult() * (_hv ? 0.15 : 1);
   const _hWind = _h ? _h.wind : { x: 0, z: 0 };
   vel.x += _hWind.x * wWind * dt;
   vel.z += _hWind.z * wWind * dt;
@@ -568,12 +575,19 @@ function _discAero(vel, discType, dt, bankArr, preview) {
 // ── CORE PHYSICS STEP ────────────────────────────────────────────────────────
 function stepDisc(pos, vel, spinArr, discType, dt, bankArr) {
   const d = DISCS[discType] || DISCS.driver;
+  // arcade tricks (arsenal.js): climbing a wall replaces flight; boosts / curls add forces
+  if (typeof ARS !== "undefined" && ARS.ctx) { if (ARS.ctx.climb && ARS.climbStep(ARS.ctx, pos, vel, dt)) return 0; ARS.step(ARS.ctx, pos, vel, dt); }
   _discAero(vel, discType, dt, bankArr, false);
+  if (typeof GAD !== "undefined") GAD.discForce(pos, vel, dt, discType);
+  // local gust zones (seeded per hole, shared clock)
+  if (typeof FEEL !== "undefined" && FEEL.gusts.length) { var _gw = FEEL.gustAt(pos.x, pos.z, FEEL._gv2 || (FEEL._gv2 = { x: 0, z: 0 })), _gk = FEEL.mod === "heavy" || d.heavy ? 0.15 : 1; vel.x += _gw.x * dt * _gk; vel.z += _gw.z * dt * _gk; }
 
   const _h2 = HOLES[holeIdx]; if (!_h2) { pos.addScaledVector(vel, dt); return vel.length(); }
   const ty = terrainY(pos.x, pos.z, _h2, holeIdx);
   if (ty > pos.y - 0.0605) {   // epsilon: a disc resting exactly on the surface counts as in contact
     pos.y = ty + 0.06;
+    if (typeof GAD !== "undefined" && GAD.discGround(pos, vel)) { pos.addScaledVector(vel, dt); return vel.length(); }   // bounce pads
+    if (typeof ARS !== "undefined" && ARS.ctx && ARS.groundHit(ARS.ctx, pos, vel)) { pos.addScaledVector(vel, dt); return vel.length(); }
     const n = getTerrainNormal(pos.x, pos.z, _h2, holeIdx);
     if (discType === "vilov" && DISCS.vilov && DISCS.vilov.special === "explode") {
       if (typeof vilovExplosionPush === "function") vilovExplosionPush();
@@ -582,7 +596,7 @@ function stepDisc(pos, vel, spinArr, discType, dt, bankArr) {
 
     // Surface material by theme: bounce / friction / skip / sound
     var _sup = _h2.course ? _h2.course.supportAt(pos.x, pos.z) : null, _sf = _sup && _sup.solid && _sup.solid.surf || (_h2.course && _h2.course.surf);
-    var _terrMat = _sf ? ({ grass: "grass", pixel: "grass", dirt: "grass", carpet: "wet", tile: "metal", snow: "snow", sand: "sand", rock: "rock", stone: "rock", concrete: "metal", metal: "metal", wood: "rock" }[_sf] || "grass") : (function(theme) {
+    var _terrMat = _sf ? ({ grass: "grass", pixel: "grass", dirt: "grass", carpet: "wet", tile: "metal", snow: "snow", sand: "sand", rock: "rock", stone: "rock", concrete: "metal", metal: "metal", wood: "rock", rubber: "rubber" }[_sf] || "grass") : (function(theme) {
       if (theme === "winter") return "snow";
       if (theme === "moon")    return "rock";
       if (theme === "city" || theme === "office" || theme === "neon" || theme === "geometry_dash") return "metal";
@@ -598,9 +612,14 @@ function stepDisc(pos, vel, spinArr, discType, dt, bankArr) {
       wet:    { bounceMult: 0.55, frictionMult: 1.80, skipMult: 0.35, sound: "terrain" },
       metal:  { bounceMult: 1.60, frictionMult: 0.55, skipMult: 1.50, sound: "metal"   },
       snow:   { bounceMult: 0.30, frictionMult: 1.60, skipMult: 0.20, sound: "terrain" },
+      rubber: { bounceMult: 2.30, frictionMult: 0.70, skipMult: 1.45, sound: "terrain" },   // bouncy castle vinyl
     }[_terrMat] || { bounceMult: 1.0, frictionMult: 1.0, skipMult: 1.0, sound: "terrain" };
     var _discBounceMod = (discType === "vilov") ? 1.4 : 1.0;
 
+    if (typeof FEEL !== "undefined" && FEEL.mod === "sticky" && vel.lengthSq() > 0.01) {   // sticky disc: stops dead where it touches
+      vel.set(0, 0, 0); if (typeof handleImpact === "function") handleImpact("terrain", pos.clone(), new THREE.Vector3(0, -2, 0));
+      AudioEngine.sfx("land", 0.4);
+    }
     if (dot < 0) {
       var _impactSpeed = Math.abs(dot);
       if (typeof handleImpact === "function" && _impactSpeed > 1.5) handleImpact(_surf.sound, pos.clone(), vel.clone());
@@ -628,6 +647,7 @@ function stepDisc(pos, vel, spinArr, discType, dt, bankArr) {
   // Walls: the ground ahead rises above the disc → bounce off the side
   var _nx = pos.x + vel.x * dt, _nz = pos.z + vel.z * dt;
   if (terrainY(_nx, _nz, _h2, holeIdx) > pos.y + 0.12) {
+    if (typeof ARS !== "undefined" && ARS.ctx && ARS.wallHit(ARS.ctx, pos, vel)) return 0;   // the Gecko grabs on and climbs
     var _wx = terrainY(_nx, pos.z, _h2, holeIdx) > pos.y + 0.12, _wz = terrainY(pos.x, _nz, _h2, holeIdx) > pos.y + 0.12;
     if (!_wx && !_wz) _wx = _wz = true;
     var _hit = Math.abs(_wx ? vel.x : 0) + Math.abs(_wz ? vel.z : 0);
@@ -702,8 +722,28 @@ var _FIXED_DT  = 1/120;  // 120 Hz fixed step — stable on any framerate
 var timeScale  = 1;      // slow-motion factor (basket approach)
 var _groundTime = 0;
 
+var _slowWhy = null;   // what the bullet time is for: "basket" | "player" | "hazard"
 function _slowMoTarget() {
-  if (mpMode || phase !== "FLYING" || !HOLES[holeIdx]) return 1;
+  _slowWhy = null;
+  if (phase !== "FLYING" || !HOLES[holeIdx]) return 1;
+  if (typeof SET !== "undefined" && SET.v && SET.v.slowmo === false) return 1;
+  // near miss / direct hit on another player: a beat of bullet time
+  if (mpMode && discVel.lengthSq() > 64) {
+    var _bt = false;
+    remotePlayers.forEach(function(rp) { if (!rp || !rp.body) return; var dx = rp.body.x - discPos.x, dz = rp.body.z - discPos.z, dy = rp.body.y + 1 - discPos.y; if (dx * dx + dz * dz < 9 && Math.abs(dy) < 2.2 && dx * discVel.x + dz * discVel.z > -2) _bt = true; });
+    if (_bt) { _slowWhy = "player"; return 0.35; }
+  }
+  // about to hit something that goes boom
+  if (typeof GAD !== "undefined" && GAD.threat(discPos, discVel)) { _slowWhy = "hazard"; return 0.3; }
+  // about to splash down in water / lava / the void: a beat of "nooooo"
+  var _C = HOLES[holeIdx].course;
+  if (_C && discVel.y < -2) {
+    var _hz0 = _C.hazard, _dy = discPos.y - _hz0.level;
+    if (_dy > 0 && _dy < 3.2) {
+      var _tt = _dy / -discVel.y, _lx = discPos.x + discVel.x * _tt, _lz = discPos.z + discVel.z * _tt, _hz = _C.hazardAt(_lx, _lz);
+      if (_hz.type !== "ob" && _hz.type !== "none" && _C.heightAt(_lx, _lz) < _hz.level - 0.2 && _C.heightAt(discPos.x, discPos.z) < _hz.level) { _slowWhy = "splash"; return 0.42; }
+    }
+  }
   // Only for the last moment before the disc reaches the basket (close call!)
   var tx = basketBase.x - discPos.x, tz = basketBase.z - discPos.z, hd = Math.hypot(tx, tz);
   if (hd > 5 || hd < 0.15) return 1;
@@ -712,12 +752,14 @@ function _slowMoTarget() {
   if (along < -0.4 || along / hs > 0.45) return 1;
   var miss = Math.abs(tx * discVel.z - tz * discVel.x) / hs;
   var y = discPos.y - basketBase.y;
-  if (miss < 1.3 && y > 0.3 && y < 2.6) return 0.3;
+  if (miss < 1.3 && y > 0.3 && y < 2.6) { _slowWhy = "basket"; return 0.3; }
   return 1;
 }
 
 function stepPhysics(dt) {
+  if (typeof CINE !== "undefined" && CINE.stopT > 0) return;   // hit-stop: the world holds its breath
   var tgt = _slowMoTarget();
+  if (_slowWhy && typeof CINE !== "undefined" && CINE.slowKind !== _slowWhy) { if (_slowWhy === "splash" && typeof AudioEngine.crowd === "function") AudioEngine.crowd("gasp"); CINE.slowKind = _slowWhy; }
   timeScale += (tgt - timeScale) * Math.min(1, dt * (tgt < timeScale ? 10 : 4));
   _physAccum += Math.min(dt, 0.05) * timeScale;
   while (_physAccum >= _FIXED_DT) {
@@ -727,6 +769,7 @@ function stepPhysics(dt) {
 }
 
 var discBank = [0];
+var _relOff = null;   // hand → release point offset, faded out over the first moments of a flight
 
 function _stepPhysicsFixed(dt) {
   if (!HOLES[holeIdx]) return;
@@ -749,15 +792,19 @@ function _stepPhysicsFixed(dt) {
     const moonBonus = HOLES[holeIdx]?.theme === "moon" && selectedDisc !== "distdriver" ? 5 : 0;
     if (flightTimer > 30 + moonBonus) { outOfBounds(true); return; }
 
+    FEEL.mod = typeof PU !== "undefined" ? PU.discMod : null;
+    if (typeof ARS !== "undefined") ARS.ctx = ARS.me;
     const spinArr = [discSpin], sp = stepDisc(discPos, discVel, spinArr, selectedDisc, dt, discBank);
+    FEEL.mod = null; if (typeof ARS !== "undefined") ARS.ctx = null;
     discSpin = spinArr[0];
     const hs = Math.hypot(discVel.x, discVel.z);
     var spinner = discMesh.userData.spinner || discMesh;
-    spinner.rotation.y += discSpin * dt;
+    if (!spinner.userData.noSpin) spinner.rotation.y += discSpin * dt;
     if (hs > 0.5) discMesh.rotation.y = Math.atan2(discVel.x, discVel.z);
     discMesh.rotation.x = -Math.atan2(discVel.y, hs + 0.001) * 0.45;
     discMesh.rotation.z = discBank[0] * 0.9;
     discMesh.position.copy(discPos);
+    if (_relOff) { var _rk = 1 - flightTimer / 0.14; if (_rk > 0) discMesh.position.addScaledVector(_relOff, _rk * _rk); else _relOff = null; }
     discMesh.visible = true;
     discMesh.frustumCulled = false;
 
@@ -819,7 +866,10 @@ function _stepPhysicsFixed(dt) {
       if (rp.flying && rp.discMesh) {
         var _ra = [rp.spin];
         if (!rp.bankArr) rp.bankArr = [0];
+        FEEL.mod = rp.mod || null;
+        if (typeof ARS !== "undefined") ARS.ctx = rp.ars || null;
         stepDisc(rp.discPos, rp.discVel, _ra, rp.discType||"midrange", dt, rp.bankArr);
+        FEEL.mod = null; if (typeof ARS !== "undefined") ARS.ctx = null;
         if (basketInteract(rp.discPos, rp.discVel, rp.discType || "midrange", false) === "score") {
           rp.flying = false; rp.discVel.set(0, 0, 0);
           rp.discPos.set(basketBase.x, basketBase.y + BASKET_DIM.trayBotY + 0.12, basketBase.z);
@@ -827,6 +877,10 @@ function _stepPhysicsFixed(dt) {
         }
         rp.spin = _ra[0];
         (rp.discMesh.userData.spinner || rp.discMesh).rotation.y += rp.spin * dt;
+        // a rival's disc whizzing past your ears
+        var _cd = camera.position.distanceTo(rp.discPos);
+        if (_cd < 5 && !rp._whz && rp.discVel.lengthSq() > 64) { rp._whz = true; AudioEngine.sfx("throw", 0.9, rp.discPos); }
+        else if (_cd > 10) rp._whz = false;
         rp.discMesh.scale.setScalar(DISC_SCALE_FLIGHT);
         rp.discMesh.position.copy(rp.discPos);
         var _rh = HOLES[holeIdx], _rg = terrainY(rp.discPos.x, rp.discPos.z, _rh, holeIdx);
@@ -837,7 +891,7 @@ function _stepPhysicsFixed(dt) {
       if (rp.discMesh) {
         var _restD = rp.body ? Math.hypot(rp.discPos.x - rp.body.x, rp.discPos.z - rp.body.z) : 0;
         rp.discMesh.visible = !!rp.flying || _restD > 1.5;
-        if (!rp.flying && rp.discMesh.visible) { rp.discMesh.position.copy(rp.discPos); rp.discMesh.scale.setScalar(DISC_SCALE_FLIGHT); }
+        if (!rp.flying && rp.discMesh.visible) { rp.discMesh.position.copy(rp.discPos); rp.discMesh.scale.setScalar(DISC_SCALE_FLIGHT); rp.discMesh.rotation.set(0, 0, 0); }
       }
       if (rp.avatarMesh) {
         if (HOLES[holeIdx]) {
@@ -907,15 +961,17 @@ function _aimCamPose(tp, tl) {
   }
   var cDir = new THREE.Vector3(Math.sin(aimAngle), 0, -Math.cos(aimAngle));
   var blen = Math.hypot(h.bx - discPos.x, h.bz - discPos.z);
-  var camDist = Math.min(13, blen * 0.4 + 6.5) * (1 + throwPower * 0.12);
+  // charging pulls the camera in tight over the throwing shoulder (tension!)
+  var chg = typeof dragging !== "undefined" && dragging ? Math.pow(throwPower, 0.7) : 0;
+  var camDist = Math.min(13, blen * 0.4 + 6.5) * (1 - chg * 0.45);
   var camGnd = terrainY(discPos.x - cDir.x * camDist, discPos.z - cDir.z * camDist, h, holeIdx);
-  var lift = (4.6 + camDist * 0.18) * (1 + (typeof PL !== "undefined" ? PL.aimPitch : 0));   // right-drag raises / lowers the aiming view
+  var lift = (4.6 + camDist * 0.18) * (1 + (typeof PL !== "undefined" ? PL.aimPitch : 0)) * (1 - chg * 0.38);   // right-drag raises / lowers the aiming view
   var camY = Math.max(py + Math.max(1.6, lift), camGnd + 3);
   var C = h.course;
   if (C && C.ceiling) camY = Math.min(camY, py + 2.6);      // low ceilings: stay close over the shoulder
   tp.set(discPos.x - cDir.x * camDist, camY, discPos.z - cDir.z * camDist);
   // Shoulder offset so the player doesn't block the line
-  tp.x += Math.cos(aimAngle) * -0.9; tp.z += Math.sin(aimAngle) * -0.9;
+  tp.x += Math.cos(aimAngle) * -(0.9 + chg * 0.5); tp.z += Math.sin(aimAngle) * -(0.9 + chg * 0.5);
   tl.set(discPos.x + cDir.x * 9, py + 1.2, discPos.z + cDir.z * 9);
   _camCollide(C, new THREE.Vector3(discPos.x, py + 1.6, discPos.z), tp);
 }
@@ -1043,7 +1099,15 @@ function updateCamera(dt) {
       // Hold the flight camera and settle on the disc
       tp.copy(_camPos); tl.copy(discPos); spd = 0.06;
     } else if (phase === "FLYING") {
-      if (timeScale < 0.75) {
+      if (timeScale < 0.75 && (typeof CINE === "undefined" || CINE.slowKind !== "basket")) {
+        // Slow-mo drama cam (fly-by, barrel, splash): swing in side-on, close to the disc
+        var vx1 = discVel.x, vz1 = discVel.z, vl1 = Math.hypot(vx1, vz1) || 1;
+        tp.set(discPos.x - vz1 / vl1 * 3.6 - vx1 / vl1 * 2.2, discPos.y + 1.1, discPos.z + vx1 / vl1 * 3.6 - vz1 / vl1 * 2.2);
+        var g1 = terrainY(tp.x, tp.z, h, holeIdx); if (tp.y < g1 + 0.8) tp.y = g1 + 0.8;
+        tl.copy(discPos).addScaledVector(discVel, 0.15);
+        _camCollide(h.course, discPos, tp);
+        spd = 0.14;
+      } else if (timeScale < 0.75) {
         // Slow-mo basket cam: side-on view of the approach
         var vx = discVel.x, vz = discVel.z, vl = Math.hypot(vx, vz) || 1;
         var sx = -vz / vl, sz = vx / vl;
@@ -1070,11 +1134,7 @@ function updateCamera(dt) {
     _camPos.lerp(tp, fr(spd)); _camLook.lerp(tl, fr(spd + 0.03));
     if (_camPos.distanceTo(tp) > 60) { _camPos.copy(tp); _camLook.copy(tl); }
     camera.position.copy(_camPos); camera.lookAt(_camLook);
-    if (typeof _screenShake !== "undefined" && _screenShake > 0.001) {
-      camera.position.x += (Math.random() - 0.5) * _screenShake;
-      camera.position.y += (Math.random() - 0.5) * _screenShake;
-    }
-    return;
+    return;   // shake is applied by FEEL.shake (smooth trauma, every camera mode)
   }
 
   // ── FIRST PERSON ─────────────────────────────────────────────────

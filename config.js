@@ -164,6 +164,48 @@ skin_king:           'models/players/King.glb',
 skin_suit:           'models/players/Suit.glb',
 skin_mannequin:      'models/players/Character Base.glb',
 skin_ghost:          'models/players/Rubber Duck.glb',
+// Creatures & plants (Quaternius on poly.pizza, CC0) — replace the old hand-built dinosaurs, ghosts and palms
+dino_trex:      'models/dinos/T-Rex.glb',
+dino_raptor:    'models/dinos/Velociraptor.glb',
+dino_apato:     'models/dinos/Apatosaurus.glb',
+dino_trike:     'models/dinos/Triceratops.glb',
+dino_stego:     'models/dinos/Stegosaurus.glb',
+dino_para:      'models/dinos/Parasaurolophus.glb',
+ghost_q:        'models/creatures/Ghost.glb',
+bat:            'models/creatures/Bat.glb',
+jungle_palm_a:  'models/nature/Palm A.glb',
+jungle_palm_b:  'models/nature/Palm B.glb',
+jungle_fern:    'models/nature/Fern.glb',
+prop_cactus:    'models/props/Cactus.glb',
+prop_bench:     'models/props/Bench.glb',
+prop_cottage:   'models/props/Cottage.glb',
+prop_lander:    'models/props/Lander.glb',
+prop_rover:     'models/props/Rover.glb',
+// More poly.pizza characters (Quaternius, CC0) — props they carried (swords, guns, a lute) stripped out
+skin_ranger:         'models/players/Hooded Adventurer.glb',
+skin_explorer:       'models/players/Explorer.glb',
+skin_riot:           'models/players/Punk Girl.glb',
+skin_anne:           'models/players/Anne.glb',
+skin_henry:          'models/players/Henry.glb',
+skin_captain:        'models/players/Pirate Captain.glb',
+skin_sharky:         'models/players/Sharky.glb',
+skin_mako:           'models/players/Mako.glb',
+skin_blocky:         'models/players/Blocky.glb',
+skin_cubeguy:        'models/players/Cube Guy.glb',
+skin_panda:          'models/players/Panda.glb',
+skin_bunny:          'models/players/Bunny.glb',
+skin_pigtails:       'models/players/Bunny Pigtails.glb',
+skin_zombie:         'models/players/Zombie.glb',
+skin_bones:          'models/players/Skeleton.glb',
+skin_ninja:          'models/players/Ninja.glb',
+skin_gremlin:        'models/players/Blue Demon.glb',
+skin_imp:            'models/players/Demon.glb',
+skin_cactoro:        'models/players/Cactoro.glb',
+skin_shroom:         'models/players/Mushroom King.glb',
+skin_fishface:       'models/players/Fish.glb',
+skin_finn:           'models/players/Frog Astronaut.glb',
+skin_bouncer:        'models/players/Platformer.glb',
+skin_robo:           'models/players/Robo.glb',
 
   // ── BASKET (appears on every hole) ────────────────────────────────────
   // basket:            'models/basket.glb',
@@ -344,6 +386,15 @@ var _modelPending = {};
 // Whether GLTFLoader script has been injected
 var _gltfLoaderReady = false;
 
+// GLBs are shipped with EXT_meshopt_compression (stream compression only — no
+// quantization, so vertex data still decodes to plain Float32 for the code that
+// reads raw positions/skin weights). The decoder is vendored in lib/.
+function _newGLTFLoader() {
+  var l = new THREE.GLTFLoader();
+  if (typeof MeshoptDecoder !== "undefined" && l.setMeshoptDecoder) l.setMeshoptDecoder(MeshoptDecoder);
+  return l;
+}
+
 // Wait for GLTFLoader (already injected in <head> via onload → _gltfReady)
 function _ensureGLTFLoader(cb) {
   if (window._gltfReady && typeof THREE !== "undefined" && typeof THREE.GLTFLoader !== "undefined") {
@@ -386,7 +437,7 @@ function loadModel(key, callback) {
 
   _ensureGLTFLoader(function() {
     console.log("DiskGolfi: loading model key='" + key + "' path='" + path + "'");
-    var loader = new THREE.GLTFLoader();
+    var loader = _newGLTFLoader();
     loader.load(path, function(gltf) {
       console.log("DiskGolfi: loaded '" + key + "' OK, meshes:", gltf.scene.children.length);
       var group = gltf.scene;
@@ -426,6 +477,8 @@ function loadModel(key, callback) {
       // Store raw animation clips on source — DO NOT create mixer here.
       // Each clone gets its own mixer in _cloneGLB so bones are correct.
       if (gltf.animations && gltf.animations.length > 0) {
+        // some exports repeat (and truncate) the armature path: "CharacterArmature|CharacterArmature|Jump|CharacterArmature|Ju" → "CharacterArmature|Jump"
+        gltf.animations.forEach(function(c) { var ps = c.name.split("|"); if (ps.length > 2) { var nm = ps.find(function(x) { return !/armature$/i.test(x); }); if (nm) c.name = ps[0] + "|" + nm; } });
         group.userData.animations = gltf.animations;  // raw clips only
         _synthPoseClips(group);                       // add Jump / Sit to rigs that ship without them
         _measureStrides(group);                       // natural ground speed of each walk / run clip (stops foot sliding)
@@ -472,7 +525,8 @@ function _synthPoseClips(root) {
   var clips = root.userData.animations || [];
   var wantJump = !clips.some(function(c) { return /jump/i.test(c.name); });
   var wantSit = !clips.some(function(c) { return /sit_?idle/i.test(c.name); });   // "Man_Sitting" is a sit-down sequence, not a held pose
-  if (!wantJump && !wantSit) return;
+  var wantMoves = !clips.some(function(c) { return /throwwind/i.test(c.name); });   // throw states, celebrations and emotes
+  if (!wantJump && !wantSit && !wantMoves) return;
   var S = THREE.PropertyBinding.sanitizeNodeName, B = {}, bones = [];
   root.traverse(function(o) { if (o.isBone) { B[o.name] = o; bones.push(o); } });
   var bn = function(n) { return B[S(n)]; };
@@ -502,7 +556,7 @@ function _synthPoseClips(root) {
     var deltaW = {};
     bones.forEach(function(b) {
       var d = spec[b.name]; if (!d) return;
-      var dq = Q(); d.forEach(function(r) { dq.premultiply(Q().setFromAxisAngle(r[0], r[1])); });
+      var dq = Q(); d.forEach(function(r) { dq.premultiply(r.isQuaternion ? r : Q().setFromAxisAngle(r[0], r[1])); });
       var dw = rq.clone().multiply(dq).multiply(rqi); deltaW[b.name] = dw;
       var target = dw.clone().multiply(idleWQ[b.name]);
       b.quaternion.copy(b.parent.getWorldQuaternion(Q()).invert().multiply(target));
@@ -558,6 +612,54 @@ function _synthPoseClips(root) {
     });
     var sp = pose(spec, drop);
     bake("Generated|SitIdle", [{ t: 0, s: sp }, { t: 1, s: sp }]);
+  }
+  if (wantMoves && bn("UpperArm.R") && bn("LowerArm.R")) {
+    // Backhand throw (right-handed). The limbs are aimed along directions in the body's own frame
+    // (x = the character's left, y = up, z = forward, measured from the rig's shoulders), so no bone
+    // axis convention can mirror it. Reach-back: shoulders turned away from the target, throwing arm
+    // swept across the FRONT of the chest to the far side; rip it through; follow through to the right.
+    var Yax = new THREE.Vector3(0, 1, 0), spine = bn("Chest") ? L("Chest") : bn("Torso") ? L("Torso") : null, sp2 = bn("Torso") && bn("Chest") ? L("Torso") : null;
+    var bL = inRoot(idleWP[bn("UpperArm.L").name]).sub(inRoot(idleWP[bn("UpperArm.R").name])); bL.y = 0; bL.normalize();
+    var bF = bL.clone().cross(Yax);
+    var kid = function(n) { var b = bn(n), ks = b ? b.children.filter(function(c) { return c.isBone; }) : []; return ks.find(function(c) { return /wrist|fist|hand|palm|middle1/i.test(c.name); }) || ks[0]; };
+    // limb direction given in the chest frame (chest turned `th` toward the left) → rotation from its idle direction
+    var aim = function(n, th, x, y, z) {
+      var b = bn(n), c = kid(n); if (!b || !c) return null;
+      var d0 = inRoot(idleWP[c.name]).sub(inRoot(idleWP[b.name])).normalize(), cs = Math.cos(th), sn = Math.sin(th);
+      var d1 = bL.clone().multiplyScalar(x * cs + z * sn).addScaledVector(Yax, y).addScaledVector(bF, -x * sn + z * cs).normalize();
+      return [Q().setFromUnitVectors(d0, d1)];
+    };
+    var throwPose = function(th, lean, ua, la, ual, lal) {
+      var o = {};
+      if (spine) o[spine] = [[Yax, th], [bL, lean]];
+      if (sp2) o[sp2] = [[Yax, th * 0.55], [bL, lean * 0.5]];
+      [["UpperArm.R", ua], ["LowerArm.R", la], ["UpperArm.L", ual], ["LowerArm.L", lal]].forEach(function(e) { var r = e[1] && aim(e[0], th, e[1][0], e[1][1], e[1][2]); if (r) o[L(e[0])] = r; });
+      return o;
+    };
+    var wP = pose(throwPose(0.8, 0.14, [0.55, -0.25, 0.8], [0.95, -0.1, 0.3], [0.45, -0.8, -0.4], [0.4, -0.75, -0.5]));
+    var wMid = pose(throwPose(0.32, 0.06, [0.12, -0.6, 0.78], [0.55, -0.35, 0.75], [0.3, -0.9, -0.2], [0.25, -0.9, -0.3]));
+    var rP = pose(throwPose(-0.12, 0.05, [-0.22, -0.12, 0.97], [-0.3, -0.05, 0.95], [0.5, -0.75, 0.25], [0.45, -0.6, 0.5]));
+    var fP = pose(throwPose(-0.75, 0.15, [-0.85, -0.25, 0.45], [-0.8, -0.35, 0.5], [0.6, -0.55, 0.55], [0.2, -0.45, 0.85]));
+    bake("Generated|ThrowWind", [{ t: 0, s: idleL }, { t: 0.2, s: wMid }, { t: 0.5, s: wP }]);
+    bake("Generated|ThrowRelease", [{ t: 0, s: wP }, { t: 0.09, s: rP }, { t: 0.32, s: fP }, { t: 0.62, s: fP }]);
+    var addSpine = function(o, tw, lean) { if (spine) o[spine] = [[Yax, tw * sL * f * 0.6], [X, (lean || 0) * f]]; if (sp2) o[sp2] = [[Yax, tw * sL * f * 0.4]]; return o; };
+    // Celebrations / emotes
+    var armsUp = function(spread, fwd) { var o = {}; o[L("UpperArm.L")] = [[Z, spread * sL], [X, fwd * f]]; o[L("UpperArm.R")] = [[Z, -spread * sL], [X, fwd * f]]; return o; };
+    var c1 = pose(armsUp(2.65, -0.15), 0), c2 = pose(armsUp(2.35, -0.35), 0.08);
+    bake("Generated|Cheer", [{ t: 0, s: c1 }, { t: 0.22, s: c2 }, { t: 0.44, s: c1 }]);
+    var dA = armsUp(0, 0); dA[L("UpperArm.R")] = [[Z, -2.5 * sL]]; dA[L("UpperArm.L")] = [[Z, 0.5 * sL], [X, -0.6 * f]]; addSpine(dA, 0.35, 0);
+    var dB = armsUp(0, 0); dB[L("UpperArm.L")] = [[Z, 2.5 * sL]]; dB[L("UpperArm.R")] = [[Z, -0.5 * sL], [X, -0.6 * f]]; addSpine(dB, -0.35, 0);
+    var dAp = pose(dA, 0.06), dBp = pose(dB, 0.06), dMid = pose(armsUp(1.2, -0.4), 0.0);
+    bake("Generated|Dance", [{ t: 0, s: dAp }, { t: 0.22, s: dMid }, { t: 0.44, s: dBp }, { t: 0.66, s: dMid }, { t: 0.88, s: dAp }]);
+    var clapOpen = {}, clapShut = {};
+    clapOpen[L("UpperArm.L")] = [[X, -1.25 * f], [Yax, 0.55 * sL * f]]; clapOpen[L("UpperArm.R")] = [[X, -1.25 * f], [Yax, -0.55 * sL * f]];
+    clapShut[L("UpperArm.L")] = [[X, -1.25 * f], [Yax, -0.12 * sL * f]]; clapShut[L("UpperArm.R")] = [[X, -1.25 * f], [Yax, 0.12 * sL * f]];
+    var cO = pose(clapOpen), cS = pose(clapShut);
+    bake("Generated|Clap", [{ t: 0, s: cO }, { t: 0.13, s: cS }, { t: 0.26, s: cO }]);
+    var taunt = {}; taunt[L("UpperArm.R")] = [[X, -1.5 * f], [Yax, -0.2 * sL * f]]; taunt[L("LowerArm.R")] = [[X, -1.55 * f]];
+    taunt[L("UpperArm.L")] = [[Z, 0.75 * sL], [X, 0.35 * f]]; if (bn("LowerArm.L")) taunt[L("LowerArm.L")] = [[Z, -0.9 * sL], [X, 0.6 * f]]; addSpine(taunt, 0, -0.18);
+    var tP = pose(taunt), tP2 = pose(Object.assign({}, taunt), 0.05);
+    bake("Generated|Taunt", [{ t: 0, s: tP }, { t: 0.3, s: tP2 }, { t: 0.6, s: tP }]);
   }
   mixer.stopAllAction(); mixer.uncacheRoot(root);
   bones.forEach(function(b, i) { b.quaternion.copy(orig[i][0]); b.position.copy(orig[i][1]); });
@@ -790,6 +892,43 @@ var DISCS = {
     special: "explode",
     colors: [0xcc0000, 0xffffff, 0x00aa44],
   },
+  // ── ARCADE DISCS (arsenal.js) — each has a trick: press SPACE / tap / Ⓐ mid-flight ──
+  rocket: {
+    // Afterburner: one boost per throw, straight along the line it's flying
+    speed: 9, launchMult: 1.08, glide: 4, lift: 0.024, drag: 0.82, turn: 0.012,
+    fade: 0.05, bounce: 0.3, groundSkip: 0.35, stability: 1.0, maxSpin: 12, maxAirtime: 10,
+    minPower: 0.2, maxPower: 1.0, optimalPow: 0.65,
+    color: 0xff4a2a, label: "Rocket", icon: "🚀", arcade: "boost", ability: "BOOST",
+    desc: "Press SPACE mid-flight to light the afterburner.",
+    tip: "Best: 40-90% power. Boost over water, up hills, onto the green.",
+  },
+  anvil: {
+    // Heavy: shrugs off wind, barely lifts — and slams straight down on command
+    speed: 10, launchMult: 1.15, glide: 2, lift: 0.03, drag: 0.9, turn: 0.002,
+    fade: 0.012, bounce: 0.02, groundSkip: 0.0, stability: 2.2, maxSpin: 6, maxAirtime: 8,
+    minPower: 0.1, maxPower: 1.0, optimalPow: 0.6, heavy: true,
+    color: 0x6a7282, label: "Anvil", icon: "⚒️", arcade: "slam", ability: "SLAM",
+    desc: "Heavy and wind-proof. SPACE slams it straight down — flattening anyone below.",
+    tip: "Best: 40-100% power. Slam it onto small islands and crowds.",
+  },
+  boomer: {
+    // Flies dead straight until you tell it to curl, then hooks hard and comes back round
+    speed: 8, launchMult: 1.05, glide: 6, lift: 0.04, drag: 0.865, turn: 0.0,
+    fade: 0.0, bounce: 0.2, groundSkip: 0.2, stability: 1.2, maxSpin: 10, maxAirtime: 11,
+    minPower: 0.15, maxPower: 1.0, optimalPow: 0.6,
+    color: 0xffc22a, label: "Boomerang", icon: "🪃", arcade: "curl", ability: "CURL",
+    desc: "Dead straight until you press SPACE — then it hooks hard (hold A / D to pick the side).",
+    tip: "Best: 40-90% power. Throw past the trees, then curl round them.",
+  },
+  gecko: {
+    // Sticks to whatever it touches first — ground, trunks, walls — and climbs walls to the top
+    speed: 6, launchMult: 1.0, glide: 4, lift: 0.032, drag: 0.85, turn: 0.004,
+    fade: 0.02, bounce: 0.0, groundSkip: 0.0, stability: 1.2, maxSpin: 9, maxAirtime: 10,
+    minPower: 0.1, maxPower: 0.9, optimalPow: 0.55,
+    color: 0x5ad83a, label: "Gecko", icon: "🦎", arcade: "stick", ability: "STICKY",
+    desc: "Sticks wherever it touches — throw it at a wall and it climbs to the top.",
+    tip: "Best: 30-80% power. Rooftops, cliff tops, no rolling away.",
+  },
 };
 
 var LOFTS = [
@@ -830,6 +969,8 @@ var THEMES = [
   "minecraft",    // blocky pixelated world — creepers, dirt blocks, ore
   "skyblock",     // single floating island survival — void below
   "vetschool",    // veterinary school — animal pens, clinic buildings, medical signs
+  "bouncy",       // giant inflatable bouncy castle over a bottomless ball pit (levels4.js)
+  "jungle",       // prehistoric jungle: dinosaurs, ferns, a volcano lobbing lava bombs (levels5.js)
 ];
 
 // ── CANONICAL WORLD SCALE ────────────────────────────────────────────────────
@@ -914,6 +1055,30 @@ var PLAYER_SKINS = [
   { id: "king", name: "The King", icon: "👑", modelKey: "skin_king", color: null, unlock: "", free: true, blurb: "Rules the fairway" },
   { id: "suit", name: "Agent", icon: "🕴️", modelKey: "skin_suit", color: null, unlock: "", free: true, blurb: "Licensed to putt" },
   { id: "mannequin", name: "Mannequin", icon: "🗿", modelKey: "skin_mannequin", color: null, unlock: "", free: true, blurb: "Hops everywhere", staticSkin: true },
+  { id: "ranger", name: "Ranger", icon: "🏹", modelKey: "skin_ranger", color: null, unlock: "", free: true, blurb: "Never misses a gap" },
+  { id: "explorer", name: "Explorer", icon: "🗺️", modelKey: "skin_explorer", color: null, unlock: "", free: true, blurb: "Maps every fairway" },
+  { id: "riot", name: "Riot", icon: "🎸", modelKey: "skin_riot", color: null, unlock: "", free: true, blurb: "Loud putts only" },
+  { id: "anne", name: "Anne", icon: "🏴‍☠️", modelKey: "skin_anne", color: null, unlock: "", free: true, blurb: "Plunders birdies" },
+  { id: "henry", name: "Henry", icon: "🎵", modelKey: "skin_henry", color: null, unlock: "", free: true, blurb: "Hums while he putts" },
+  { id: "captain", name: "Captain", icon: "🦜", modelKey: "skin_captain", color: null, unlock: "", free: true, blurb: "Parrot caddie included" },
+  { id: "sharky", name: "Sharky", icon: "🦈", modelKey: "skin_sharky", color: null, unlock: "", free: true, blurb: "Smells a birdie a mile away" },
+  { id: "mako", name: "Mako", icon: "🌊", modelKey: "skin_mako", color: null, unlock: "", free: true, blurb: "Fresh out of the water hazard" },
+  { id: "blocky", name: "Blocky", icon: "🧱", modelKey: "skin_blocky", color: null, unlock: "", free: true, blurb: "Crafted for chains" },
+  { id: "cubeguy", name: "Cube Guy", icon: "🟧", modelKey: "skin_cubeguy", color: null, unlock: "", free: true, blurb: "Hip to be square" },
+  { id: "panda", name: "Panda", icon: "🐼", modelKey: "skin_panda", color: null, unlock: "", free: true, blurb: "Bamboo-shafted putter" },
+  { id: "bunny", name: "Bunny", icon: "🐰", modelKey: "skin_bunny", color: null, unlock: "", free: true, blurb: "Hops the rough" },
+  { id: "pigtails", name: "Pigtails", icon: "🥕", modelKey: "skin_pigtails", color: null, unlock: "", free: true, blurb: "Carrot-powered drives" },
+  { id: "zombie", name: "Zombie", icon: "🧟", modelKey: "skin_zombie", color: null, unlock: "", free: true, blurb: "Back from out of bounds" },
+  { id: "bones", name: "Bones", icon: "💀", modelKey: "skin_bones", color: null, unlock: "", free: true, blurb: "No body to blame" },
+  { id: "ninja", name: "Ninja", icon: "🥷", modelKey: "skin_ninja", color: null, unlock: "", free: true, blurb: "Silent but deadly putts" },
+  { id: "gremlin", name: "Gremlin", icon: "👹", modelKey: "skin_gremlin", color: null, unlock: "", free: true, blurb: "Lives in the water hazards" },
+  { id: "imp", name: "Imp", icon: "😈", modelKey: "skin_imp", color: null, unlock: "", free: true, blurb: "Devilish hyzers" },
+  { id: "cactoro", name: "Cactoro", icon: "🌵", modelKey: "skin_cactoro", color: null, unlock: "", free: true, blurb: "Prickly about his score" },
+  { id: "shroom", name: "Shroom King", icon: "🍄", modelKey: "skin_shroom", color: null, unlock: "", free: true, blurb: "A real fun-guy" },
+  { id: "fishface", name: "Fishface", icon: "🐠", modelKey: "skin_fishface", color: null, unlock: "", free: true, blurb: "Water is a shortcut" },
+  { id: "finn", name: "Finn", icon: "🐸", modelKey: "skin_finn", color: null, unlock: "", free: true, blurb: "One small hop for frog" },
+  { id: "bouncer", name: "Bouncer", icon: "💙", modelKey: "skin_bouncer", color: null, unlock: "", free: true, blurb: "Double-jumps for joy" },
+  { id: "robo", name: "Robo", icon: "🤖", modelKey: "skin_robo", color: null, unlock: "", free: true, blurb: "Calculated every angle" },
 ];
 // Master backdoor: unlocks ALL skins at once
 var PLAYER_SKINS_MASTER_CODE = "TOYOTA";
@@ -966,7 +1131,7 @@ var _gltfLoader = null;
 function getGLTFLoader() {
   if (_gltfLoader) return _gltfLoader;
   if (typeof THREE.GLTFLoader !== "undefined") {
-    _gltfLoader = new THREE.GLTFLoader();
+    _gltfLoader = _newGLTFLoader();
     return _gltfLoader;
   }
   return null;

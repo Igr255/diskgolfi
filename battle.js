@@ -145,8 +145,8 @@ BT.hit = function(target, cause, dx, dz, force, up) {
   if (rp) rp.koT = 0.25;   // stop double hits until the victim confirms
   sendToAll({ t: "ko_hit", target: target, by: myIdx, c: cause, dx: +dx.toFixed(3), dz: +dz.toFixed(3), f: +force.toFixed(1), u: +up.toFixed(1) });
 };
-var _KO_WORDS = { disc: "DISC TO THE FACE!", slap: "SLAPPED!", bat: "HOME RUN!", car: "ROADKILL!", rocket: "KABOOM!", mine: "BOOM!", dart: "BULLSEYE!", laser: "VAPORISED!", freeze: "FROZEN!", poop: "SPLAT!", horn: "HONK!", fire: "TOASTED!", boom: "KABOOM!" };
-var _KO_ICONS = { disc: "🥏", slap: "✋", bat: "🏏", car: "🚗", rocket: "🚀", mine: "💣", dart: "🔫", laser: "🛰️", freeze: "❄️", poop: "💩", fire: "🔥", boom: "💥" };
+var _KO_WORDS = { disc: "DISC TO THE FACE!", slap: "SLAPPED!", bat: "HOME RUN!", car: "ROADKILL!", rocket: "KABOOM!", mine: "BOOM!", dart: "BULLSEYE!", laser: "VAPORISED!", freeze: "FROZEN!", poop: "SPLAT!", horn: "HONK!", fire: "TOASTED!", boom: "KABOOM!", anvil: "FLATTENED!", barrel: "KA-BLAMMO!", goose: "GOOSED!", pad: "BOING!" };
+var _KO_ICONS = { disc: "🥏", slap: "✋", bat: "🏏", car: "🚗", rocket: "🚀", mine: "💣", dart: "🔫", laser: "🛰️", freeze: "❄️", poop: "💩", fire: "🔥", boom: "💥", anvil: "⚒️", barrel: "🛢️", goose: "🪿", pad: "🍄" };
 // Victim side
 BT.receiveHit = function(m) {
   if (phase === "MENU" || !HOLES[holeIdx]) return;
@@ -168,11 +168,17 @@ BT.knockMe = function(by, cause, dx, dz, force, up) {
   }
   BT.stunT = freeze ? 3.0 : 2.0; BT.immuneT = BT.stunT + 1.6;
   PL._setAnim(freeze ? "idle" : "death");
+  // a knockout sends the body flying limp (hit impulse is top-heavy, so it cartwheels)
+  if (!freeze && typeof RAG !== "undefined") { var lr = Math.hypot(dx, dz) || 1; RAG.startLocal("ko", PL.vel, new THREE.Vector3(dx / lr * force * 0.35, up * 0.25, dz / lr * force * 0.35), BT.stunT); }
+  if (typeof CINE !== "undefined") CINE.hitStop(0.09);
   BT.starsOn(localAvatarMesh, true);
   _spawnBonkText(PL.pos.clone().add(new THREE.Vector3(0, 2.4, 0)), _KO_WORDS[cause] || "KO!");
   AudioEngine.sfx(freeze ? "splash" : "bonk");
   _screenShake = 0.55; _screenShakeT = 0.5;
   BT.koFlash(); CAMFX.kick(-7);
+  if (typeof INPUT !== "undefined") INPUT.rumble(1, 0.8, 350);
+  if (typeof TIPS !== "undefined") TIPS.show("ko", { k: INPUT.glyph("dive") }, 1500);
+  if (typeof LOG !== "undefined") LOG.ev("ko", { cause: cause });
   if (mpMode) sendToAll({ t: "ko", v: myIdx, by: by, c: cause });
   BT.onKO(myIdx, by, cause);
 };
@@ -181,6 +187,7 @@ BT.onKO = function(v, by, cause) {
   var self = by === v || by < 0 || by === undefined;
   if (v !== myIdx) {
     var rp = remotePlayers[v];
+    if (rp && rp.body) AudioEngine.sfx("bonk", 0.7, rp.body);
     if (rp) { rp.koT = cause === "freeze" ? 3.0 : 2.0; if (rp.avatarMesh) { BT.starsOn(rp.avatarMesh, true); if (cause === "freeze") BT.iceOn(rp.avatarMesh, true); } }
   }
   if (self) { BT.feedAdd(_KO_ICONS[cause] + " <b style='color:" + BT.col(v) + "'>" + _esc(BT.name(v)) + "</b> knocked themselves out"); return; }
@@ -195,6 +202,8 @@ BT.onKO = function(v, by, cause) {
   BT.lastKOBy[v] = by;
   BT.feedAdd("<b style='color:" + BT.col(by) + "'>" + _esc(BT.name(by)) + "</b> " + (_KO_ICONS[cause] || "💥") + " <b style='color:" + BT.col(v) + "'>" + _esc(BT.name(v)) + "</b>" + tag);
   if (by === myIdx) {
+    if (typeof PROG !== "undefined") PROG.ko();
+    if (typeof INPUT !== "undefined") INPUT.rumble(0.5, 0.5, 120);
     // the rush of a knockout: a few seconds of extra speed
     if (typeof PU !== "undefined") PU.active.speed = Math.max(PU.active.speed || 0, T + 3);
     AudioEngine.sfx("pickup");
@@ -223,6 +232,8 @@ BT.update = function(dt) {
   });
   BT._spin(dt);
   BT.tickHost(); BT.tickClock();
+  var tense = BT.on() && BT.clock && BT.clock.k !== "limit" && !myHoleDone ? 1 : 0;
+  if (tense !== BT._tense) { BT._tense = tense; AudioEngine.setIntensity(tense); }
   if ((BT._uiAcc = (BT._uiAcc || 0) + dt) > 0.25) { BT._uiAcc = 0; BT.renderClock(); if (BT.on()) BT.renderBoard(); }
 };
 
@@ -247,13 +258,17 @@ BT.discSweep = function(pos, vel, fire) {
     var dy = pos.y - rp.body.y;
     if (dy < 0.1 || dy > 2.0 || Math.hypot(pos.x - rp.body.x, pos.z - rp.body.z) > 0.8) return;
     BT._hitThisThrow["p" + i] = 1;
-    BT.hit(i, fire ? "fire" : "disc", vel.x, vel.z, (fire ? 16 : 7) + sp * 0.4, fire ? 12 : 7);
+    var heavy = (typeof PU !== "undefined" && PU.discMod === "heavy") || !!(DISCS[selectedDisc] || {}).heavy;
+    BT.hit(i, fire ? "fire" : heavy ? "boom" : "disc", vel.x, vel.z, (fire || heavy ? 16 : 7) + sp * 0.4, fire || heavy ? 12 : 7);
+    if (heavy) fire = true;   // an anvil doesn't bounce off people
     _spawnBonkText(rp.body.clone().add(new THREE.Vector3(0, 2.2, 0)), "BONK!");
     AudioEngine.sfx("bonk");
+    if (typeof CINE !== "undefined") { var _rpv = rp; CINE.react(function() { var p = _rpv.avatarMesh && RAG.pelvis(_rpv.avatarMesh); return p ? p.clone() : _rpv.body ? _rpv.body.clone().setY(_rpv.body.y + 0.8) : null; }, "DISC TO THE FACE!", 2.4); }
     if (!fire) { vel.x *= -0.25; vel.z *= -0.25; vel.y = Math.abs(vel.y) * 0.3 + 2; }
   });
   remotePlayers.forEach(function(rp, i) {
     if (!rp || rp.flying || !rp.discMesh || !rp.discMesh.visible || BT._hitThisThrow["d" + i]) return;
+    if (rp.body && Math.hypot(rp.discPos.x - rp.body.x, rp.discPos.z - rp.body.z) < 1.5) return;   // it's in their hand
     if (Math.abs(pos.y - rp.discPos.y) > 0.9 || Math.hypot(pos.x - rp.discPos.x, pos.z - rp.discPos.z) > 0.85) return;
     BT._hitThisThrow["d" + i] = 1;
     var k = Math.min(1, sp / 25);

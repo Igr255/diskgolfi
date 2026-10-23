@@ -19,6 +19,8 @@ function showMsg(big, sub, btnTxt) {
 
 function hideMsg() {
   document.getElementById("msg").classList.remove("on");
+  // a faded-out message must not leave its button clickable (it sits mid-screen, right where you aim)
+  document.getElementById("msg-btn").style.display = "none";
 }
 
 function _themeName(theme) {
@@ -141,7 +143,8 @@ function initGameDiscPicker() {
     b.dataset.t  = key;
     b.title = (d.label || key) + " — " + (d.desc || d.tip || "") + "  (" + (i + 1) + ")";
     b.setAttribute("aria-label", d.label || key);
-    b.innerHTML = '<span class="orb" style="--c:' + _discCss(key) + '"></span><span class="dkey">' + (i + 1) + '</span>';
+    if (d.arcade) b.classList.add("arc");
+    b.innerHTML = '<span class="orb" style="--c:' + _discCss(key) + '"></span><span class="dkey">' + (["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="][i] || "") + '</span>' + (d.arcade ? '<span class="dab">' + d.icon + '</span>' : '');
     b.onclick = () => selectDisc(key);
     container.appendChild(b);
     // show the real skin artwork on the button
@@ -321,6 +324,9 @@ function doThrow() {
   var groundHere = terrainY(discPos.x, discPos.z, h, holeIdx);
   discPos.y = groundHere + RELEASE_HEIGHT;
   _throwStart = discPos.clone();
+  // the flight starts at the usual release point; the mesh eases out of the hand into it
+  _relOff = discMesh && cameraMode === "tp" ? discMesh.position.clone().sub(discPos) : null;
+  if (_relOff && _relOff.length() > 2.5) _relOff = null;
   AudioEngine.sfx("throw", throwPower);
   // The controls hint fades away once the player has thrown a couple of times
   window._dgThrowsSeen = (window._dgThrowsSeen || 0) + 1;
@@ -329,10 +335,16 @@ function doThrow() {
   _groundTime = 0;
 
   if (typeof PU !== "undefined" && PU.fireNext) { launchVel.multiplyScalar(1.4); PU.fireNext = false; PU.fireThrow = true; AudioEngine.sfx("energy"); }
+  if (typeof PU !== "undefined") { PU.discMod = PU.modNext || null; PU.modNext = null; }
+  if (typeof ARS !== "undefined") ARS.onThrow();
   if (typeof BT !== "undefined") BT._hitThisThrow = {};
   if (typeof CAMFX !== "undefined") CAMFX.kick(4 + throwPower * 6);
+  if (typeof CINE !== "undefined") { CINE.onThrow(throwPower); CINE.maybeFaceplant(throwPower); }
   discVel.copy(launchVel);
   discSpin = d.maxSpin * throwPower;
+  if (typeof PL !== "undefined") { PL.emoteT = 0; PL._setAnim("throwrelease"); PL._lockAnim = T + 0.65; }
+  if (typeof ANIM !== "undefined") ANIM.release(localAvatarMesh, throwPower);
+  if (typeof INPUT !== "undefined" && INPUT.device !== "pad") INPUT.rumble(0.2 + throwPower * 0.5, 0.3, 80);
   throwCount++;
   flightTimer = 0;
   pushThrowHistory();
@@ -346,7 +358,7 @@ function doThrow() {
     px: discPos.x, py: discPos.y, pz: discPos.z,
     vx: discVel.x, vy: discVel.y, vz: discVel.z,
     disc: selectedDisc, skin: (discMesh && discMesh.userData.skinId) || "classic", count: throwCount, hz: releaseBank,
-    fire: typeof PU !== "undefined" && PU.fireThrow ? 1 : 0
+    fire: typeof PU !== "undefined" && PU.fireThrow ? 1 : 0, mod: typeof PU !== "undefined" ? PU.discMod : null
   });
 }
 
@@ -428,7 +440,10 @@ window.addEventListener("keydown", (e) => {
   else if (k === "m") { var mm = document.getElementById("minimap"); if (mm) mm.classList.toggle("hidden"); }
   else if (k === "h" || e.key === "?") toggleHelp();
   else if (e.key === "Escape") { var hp = document.getElementById("help-panel"); if (hp) hp.style.display = "none"; }
-  else if (/^[1-8]$/.test(e.key) && phase === "AIMING") { var dk = Object.keys(DISCS)[parseInt(e.key, 10) - 1]; if (dk) selectDisc(dk); }
+  else if (/^Digit[0-9]$|^Minus$|^Equal$/.test(e.code) && phase === "AIMING") {   // 1–9, 0, -, = pick a disc
+    var di = { Digit0: 9, Minus: 10, Equal: 11 }[e.code]; if (di === undefined) di = parseInt(e.code.slice(5), 10) - 1;
+    var dk = Object.keys(DISCS)[di]; if (dk) selectDisc(dk);
+  }
 });
 function toggleSound() {
   var sp = document.getElementById("sound-panel"); if (!sp) return;
@@ -655,9 +670,11 @@ function _buildSkinGrid() {
 
 // ── MENU VIEWS ───────────────────────────────────────────────────────────────
 function menuView(name) {
+  if (typeof LOG !== "undefined") LOG.ev("menu", { v: name });
   var v = { home: "sp-main-btns", play: "sp-map-picker", mp: "mp-panel" };
   Object.keys(v).forEach(function(k) { var el = document.getElementById(v[k]); if (el) el.style.display = k === name ? "" : "none"; });
   if (name === "play") { _buildSpMapPicker(); _syncSegs(); }
+  if (typeof MENU3D !== "undefined" && name !== "home") MENU3D.react(name);
 }
 function _showMpPanel() { menuView("mp"); _mpTab("host"); }
 function _mpTab(tab) {
@@ -795,6 +812,11 @@ function drawMinimap() {
   if (typeof trajLandRing !== "undefined" && trajLandRing && trajLandRing.visible) {
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.beginPath();
     ctx.arc(X(trajLandRing.position.x, trajLandRing.position.z), Y(trajLandRing.position.x, trajLandRing.position.z), 6, 0, Math.PI * 2); ctx.stroke();
+  }
+  // item bags and live mines
+  if (typeof PU !== "undefined") {
+    PU.tokens.forEach(function(tk) { if (tk.taken) return; ctx.fillStyle = "#b46aff"; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.rect(X(tk.x, tk.z) - 3.5, Y(tk.x, tk.z) - 3.5, 7, 7); ctx.fill(); ctx.stroke(); });
+    PU.mines.forEach(function(mn) { ctx.fillStyle = Math.sin(T * 8) > 0 ? "#ff3a3a" : "#7a1010"; ctx.beginPath(); ctx.arc(X(mn.x, mn.z), Y(mn.x, mn.z), 3, 0, Math.PI * 2); ctx.fill(); });
   }
   // other players
   remotePlayers.forEach(function(rp, i) {

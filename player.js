@@ -96,6 +96,12 @@ var PL = {
       if (this.respawnT <= 0) { p.copy(this.safe); this.vel.set(0, 0, 0); this.onGround = true; if (localAvatarMesh) localAvatarMesh.visible = true; }
       return;
     }
+    // Limp: the ragdoll moves us (RAG.update follows the pelvis) — only hazards still apply
+    if (typeof RAG !== "undefined" && RAG.busy()) {
+      var hzR = c.hazardAt(p.x, p.z), gR = c.heightAt(p.x, p.z);
+      if (hzR.type !== "ob" && ((p.y < hzR.level + 0.05 && gR < hzR.level) || p.y < hzR.level - 3 || p.y < -60)) this.fall(hzR.type);
+      return;
+    }
     // Ride moving platforms
     var sup = this.onGround ? c.supportAt(p.x, p.z) : null;
     if (sup && sup.solid && sup.solid.mover) { p.x += sup.solid.dx || 0; p.z += sup.solid.dz || 0; p.y += sup.solid.dy || 0; }
@@ -115,7 +121,9 @@ var PL = {
     this.coyote = this.onGround ? 0.12 : this.coyote - dt;
     if (this.jumpBuf > 0) this.jumpBuf -= dt;
     if (this.jumpBuf > 0 && this.coyote > 0 && !(typeof BT !== "undefined" && BT.locked())) {
-      this.vel.y = this.JUMP * (c.gravity < 1 ? 0.9 : 1) * (typeof PU !== "undefined" ? PU.jumpMul() : 1); this.onGround = false; this.coyote = 0; this.jumpBuf = 0;
+      var _rub = PL._surf(c, p) === "rubber";
+      this.vel.y = this.JUMP * (c.gravity < 1 ? 0.9 : 1) * (typeof PU !== "undefined" ? PU.jumpMul() : 1) * (_rub ? 1.4 : 1); this.onGround = false; this.coyote = 0; this.jumpBuf = 0;
+      if (_rub) AudioEngine.sfx("boing", 0.35);
       AudioEngine.sfx("jump"); ANIM.squash(localAvatarMesh, -0.14);
       this._setAnim("jump");
     }
@@ -135,15 +143,25 @@ var PL = {
       g = c.heightAt(p.x, p.z);
       if (p.y <= g) {
         var impact = -this.vel.y;
+        // a long drop off a cliff: splat, ragdoll style
+        if (impact > 15 && this.airT > 0.5 && typeof RAG !== "undefined" && RAG.startLocal("fall", new THREE.Vector3(this.vel.x, -impact * 0.35, this.vel.z), new THREE.Vector3(this.vel.x * 0.2, 2, this.vel.z * 0.2), 1.1)) {
+          p.y = g; this.airT = 0; if (typeof _screenShake !== "undefined") { _screenShake = 0.45; _screenShakeT = 0.4; }
+          _spawnBonkText(p.clone().add(new THREE.Vector3(0, 1.6, 0)), "SPLAT!");
+          return;
+        }
         p.y = g; this.vel.y = 0; this.onGround = true;
-        if (this.airT > 0.25) { AudioEngine.sfx("land", Math.min(1, impact / 14)); this._setAnim("grounded"); this.animT = 0.18; ANIM.squash(localAvatarMesh, Math.min(0.32, impact * 0.022)); if (impact > 9 && typeof spawnDust === "function") spawnDust(p.clone(), Math.min(1, impact / 16)); }
+        // rubber floors (bouncy castle) throw you back up, a little less each time
+        var _land = c.supportAt(p.x, p.z).solid;   // (pads / trampolines launch you themselves)
+        if (impact > 3.5 && !(_land && _land.bounce) && PL._surf(c, p) === "rubber") { this.vel.y = impact * 0.55; this.onGround = false; this.airT = 0.01; AudioEngine.sfx("boing", Math.min(0.6, impact / 20)); ANIM.squash(localAvatarMesh, Math.min(0.3, impact * 0.025)); }
+        else if (this.airT > 0.25) { AudioEngine.sfx("land", Math.min(1, impact / 14)); this._setAnim("grounded"); this.animT = 0.18; ANIM.squash(localAvatarMesh, Math.min(0.32, impact * 0.022)); if (impact > 9 && typeof spawnDust === "function") spawnDust(p.clone(), Math.min(1, impact / 16)); }
         this.airT = 0;
       }
     } else this.airT = 0;
     if (this.onGround) c.touch(p.x, p.z);    // crumbling platforms
     // Hazards: water / lava / void
     var hz = c.hazardAt(p.x, p.z);
-    if ((p.y < hz.level + 0.05 && g < hz.level) || p.y < hz.level - 3 || p.y < -60) this.fall(hz.type);
+    if (hz.type === "ob") { if (typeof FEEL !== "undefined" ? FEEL.oobStep(dt, g < hz.level) : true) this.fall("ob"); }
+    else { if (typeof FEEL !== "undefined") FEEL.oobStep(dt, false); if ((p.y < hz.level + 0.05 && g < hz.level) || p.y < hz.level - 3 || p.y < -60) this.fall(hz.type); }
     // Remember the last safe spot (solid, static, not near an edge)
     this.safeT -= dt;
     if (this.onGround && this.safeT <= 0) {
@@ -160,6 +178,7 @@ var PL = {
       this.yaw += dy * Math.min(1, 12 * dt);
     }
     if (typeof BT !== "undefined" && BT.locked()) this._setAnim(BT.frozenT > 0 ? "idle" : "death");
+    else if (this.emoteT > T && this.onGround && hs < 0.4) { /* emote keeps playing until you move */ }
     else if (this.animT > 0) this.animT -= dt;
     else if (!this.onGround) this._setAnim(this.vel.y > 0 ? "jump" : this.airT > 0.35 ? "jump" : this.anim);
     else this._setAnim(hs > 2.4 ? "sprint" : hs > 0.4 ? "walk" : "idle");   // clips are stride-matched in ANIM.drive
@@ -183,13 +202,16 @@ var PL = {
     if (keys.ArrowDown) this.camPitch = Math.max(-0.2, this.camPitch - 1.2 * dt);
   },
 
+  _surf: function(c, p) { var sp = c.supportAt(p.x, p.z); return (sp.solid && sp.solid.surf) || c.surf; },
   surfHardness: function(c, sup) {
     var s = (sup && sup.solid && sup.solid.surf) || c.surf;
-    return { grass: 0.25, carpet: 0.15, snow: 0.2, sand: 0.3, dirt: 0.3, wood: 0.6, tile: 0.85, stone: 0.8, rock: 0.75, concrete: 0.8, metal: 1, pixel: 0.4 }[s] || 0.5;
+    return { rubber: 0.12, grass: 0.25, carpet: 0.15, snow: 0.2, sand: 0.3, dirt: 0.3, wood: 0.6, tile: 0.85, stone: 0.8, rock: 0.75, concrete: 0.8, metal: 1, pixel: 0.4 }[s] || 0.5;
   },
 
   fall: function(type) {
     if (this.respawnT > 0) return;
+    if (typeof RAG !== "undefined" && RAG.me) RAG.stop(localAvatarMesh, true);
+    if (typeof TIPS !== "undefined" && (type === "water" || type === "lava")) TIPS.show("water", null, 1200);
     this.respawnT = 0.9;
     AudioEngine.sfx(type === "void" || type === "none" ? "energy" : type === "ob" ? "swipe" : "splash");
     if (typeof spawnParticleBurst === "function") spawnParticleBurst(this.pos.clone(), new THREE.Color(type === "lava" ? 0xff5a10 : type === "void" ? 0xb46aff : 0x9adcf0), 18);
@@ -199,6 +221,13 @@ var PL = {
 
   // Knock the player back (cars, saws, stomping feet …)
   knock: function(nx, nz, force, up) {
+    // a proper wallop (cars, rollers, stomps, explosions) sends you limp
+    if (force >= 6.5 && typeof RAG !== "undefined" && !RAG.busy() &&
+        RAG.startLocal("knock", new THREE.Vector3(nx * force, up || 4, nz * force), new THREE.Vector3(nx * force * 0.35, (up || 4) * 0.4, nz * force * 0.35), 0.9)) {
+      if (typeof _screenShake !== "undefined") { _screenShake = 0.4; _screenShakeT = 0.4; }
+      if (typeof CINE !== "undefined") CINE.hitStop(0.07);
+      return;
+    }
     this.vel.x = nx * force; this.vel.z = nz * force;
     if (this.onGround) { this.vel.y = up || 4; this.onGround = false; }
     this.animT = 0.4; this._setAnim("jump");
@@ -231,7 +260,8 @@ var PL = {
   cameraPose: function(tp, tl) {
     var c = this.course(), p = this.pos;
     var head = new THREE.Vector3(p.x, p.y + 1.55, p.z);
-    var cp = Math.cos(this.camPitch), dist = this.camDist;
+    this._koCam = (this._koCam || 0) + (((typeof BT !== "undefined" && BT.stunT > 0) ? 3 : 0) - (this._koCam || 0)) * 0.08;
+    var cp = Math.cos(this.camPitch), dist = this.camDist + this._koCam;
     var dx = -Math.sin(this.camYaw) * cp, dz = Math.cos(this.camYaw) * cp, dy = Math.sin(this.camPitch);
     var free = PL.camRay(c, head, dx, dy, dz, dist);
     tp.set(head.x + dx * free, head.y + dy * free, head.z + dz * free);

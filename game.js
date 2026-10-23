@@ -65,8 +65,22 @@ function _doPunch() {
     if (d < bestDist && Math.abs(PL.pos.y - rp.body.y) < 1.8) { bestDist = d; bestIdx = i; }
   });
   _punchSwingEffect();
+  if (GAD.hitNear(PL.pos.x, PL.pos.z, Math.sin(PL.yaw), Math.cos(PL.yaw), 2.2)) AudioEngine.sfx("bonk");
   if (typeof _screenShake !== "undefined") { _screenShake = 0.18; _screenShakeT = 0.22; }
-  if (bestIdx < 0) return;  // swing and a miss
+  if (bestIdx < 0) {   // no rival in reach: slap a bystander instead
+    var fx = Math.sin(PL.yaw), fz = Math.cos(PL.yaw);
+    ENT.list.forEach(function(o) {
+      if (!o.update || o.rag || !/jogger|dancer|critter|minion|knight|goose/.test(o.type)) return;
+      var ox = o.x - PL.pos.x, oz = o.z - PL.pos.z, od = Math.hypot(ox, oz);
+      if (od < PUNCH_RANGE + (o.r || 0.4) && (ox * fx + oz * fz) / (od || 1) > 0.2) {
+        ENT.launch(o, ox / (od || 1) * 9, 6, oz / (od || 1) * 9);
+        _spawnBonkText(new THREE.Vector3(o.x, (o.worldY || o.y) + 1.8, o.z), "SLAP!"); AudioEngine.sfx("bonk");
+        if (o.type === "goose") { o.angryT = 4; GAD.honk(o, true); }
+        if (typeof CINE !== "undefined") CINE.hitStop(0.06);
+      }
+    });
+    return;   // swing and a miss
+  }
   var rp = remotePlayers[bestIdx];
   var pdx = rp.body.x - PL.pos.x, pdz = rp.body.z - PL.pos.z, pl = Math.hypot(pdx, pdz) || 1;
   // A slap knocks them out (Battle mode rules); a running slap hits harder
@@ -601,6 +615,8 @@ function skipIntro() {
 // ── LOAD HOLE ────────────────────────────────────────────────────────────────
 function loadHole(idx) {
   holeIdx = idx;
+  if (typeof POD !== "undefined") POD.hide();
+  if (typeof MENU3D !== "undefined") MENU3D.clear();
   CAMFX.fadeIn();
   _menuBackdrop = false;
   if (!basketWP)     basketWP     = new THREE.Vector3();
@@ -663,8 +679,14 @@ function loadHole(idx) {
   initTrajDots();
   initTrail();
   spawnPowerups(h, idx);
+  GAD.build(h, C, _built.spawns, idx);   // bounce pads, updraft fans, barrels, geese (srng: same on every client)
   BT.onHoleStart(h);
   LIFE.build(h, C);
+  FEEL.build(h, C);
+  window._holeT0 = T;
+  if (idx === 0) window._matchT0 = Date.now();
+  LOG.ev(idx === 0 ? "match_start" : "hole_start", { hole: idx, theme: h.theme, mp: !!mpMode, players: mpMode ? playerCount : 1, mode: mpMode ? BT.mode : "solo" });
+  if (BT.on()) TIPS.show("battle", null, 4000); else TIPS.show("aim", null, 4500);
 
   GFX.fogBoost = h.mods.indexOf("fog") >= 0 ? 3.2 : 1;
   // Weather that fits the world: none indoors, in space or in the neon clubs
@@ -672,6 +694,8 @@ function loadHole(idx) {
   if (_wArch === "interior" || _wArch === "club" || _wArch === "moon" || h.theme === "geometry_dash" || h.theme === "skyblock") weathers = ["clear"];
   else if (h.theme === "winter") weathers = ["clear", "clear", "snow", "windy"];
   else if (h.theme === "grandcanyon" || h.theme === "emote") weathers = ["clear", "clear", "hot", "windy"];
+  else if (_wArch === "bouncy") weathers = ["clear", "clear", "clear", "windy"];
+  else if (h.theme === "jungle") weathers = ["clear", "clear", "hot", "rainy", "foggy"];
   else if (h.theme === "city") weathers = ["clear", "clear", "rainy", "foggy", "stormy"];
   else weathers = weathers.filter(function(w) { return w !== "snow"; });
   var _pickedWeather = weathers[Math.floor(Math.random() * weathers.length)];
@@ -906,6 +930,9 @@ function scored() {
   }
   if (throwCount !== 1) AudioEngine.stinger(diff <= -2 ? "eagle" : diff === -1 ? "birdie" : diff === 0 ? "par" : diff === 1 ? "bogey" : "worse");
   pushThrowHistory();
+  CINE.onScore(throwCount, par, _throwStart ? Math.hypot(_throwStart.x - basketWP.x, _throwStart.z - basketWP.z) : 0);
+  EMOTE.celebrate(); PROG.hole(throwCount, par);
+  LOG.ev("hole_end", { hole: holeIdx, throws: throwCount, par: par, theme: HOLES[holeIdx].theme, sec: Math.round(T - (window._holeT0 || T)), mp: !!mpMode });
 
   if (mpMode) {
     playerDone[myIdx]   = true;
@@ -938,7 +965,7 @@ var discLie = null;          // where the disc rests between throws
 function landed() {
   if (!HOLES[holeIdx]) { phase = "AIMING"; return; }
   phase = "LANDED";
-  PU.fireThrow = false;
+  PU.fireThrow = false; PU.discMod = null;
   const h = HOLES[holeIdx], m = Math.hypot(discPos.x - h.bx, discPos.z - h.bz);
   discLie = discPos.clone();
   ENT.landT = T;
@@ -947,38 +974,41 @@ function landed() {
   if (_td > dgStats.longest) { dgStats.longest = Math.round(_td); saveStats(); }
   dd.innerHTML = (_td > 0.5 ? "<span class='accent'>" + _td.toFixed(1) + " m throw</span> &nbsp;·&nbsp; " : "") + m.toFixed(1) + " m to basket";
   dd.style.opacity = "1";
+  CINE.onLand(m, _td);
   if (mpMode) sendToAll({ t: "land", from: myIdx, px: discPos.x, py: discPos.y, pz: discPos.z, throws: throwCount });
   setTimeout(() => {
     if (phase !== "LANDED") return;
     dd.style.opacity = "0";
-    if (throwCount >= 12) {
-      if (holeScores[holeIdx] === undefined || holeScores[holeIdx] === null) {
-        holeScores[holeIdx] = throwCount;
-        totalVsPar += throwCount - HOLES[holeIdx].par;
-      }
-      myHoleDone = true;
-      playerDone[myIdx]   = true;
-      playerThrows[myIdx] = throwCount;
-      if (mpMode) {
-        sendToAll({ t: "givenup", from: myIdx, throws: throwCount, hole: holeIdx, dnf: 1 });
-        BT.onScore(myIdx, throwCount, { dnf: 1 });
-        if (!mpScoreRecorded[myIdx]) { mpTotals[myIdx] += throwCount - HOLES[holeIdx].par; mpScoreRecorded[myIdx] = true; }
-        updateMpUI();
-        if (BT.on() && !checkAllDone()) { showMsg("MAX THROWS", "No points this hole \u2014 go wreck the others!", null); BT.goRoam(); }
-        else if (!checkAllDone()) {
-          const watchIdx = playerDone.findIndex((d, i) => !d && i < playerCount);
-          setSpectating(true, watchIdx);
-          showMsg("MAX THROWS", "Watching others finish\u2026", null);
-        }
-      } else {
-        showMsg("MAX THROWS", "12 throws reached \u2014 moving on!", "Next Hole \u2192");
-      }
-      return;
-    }
+    if (throwCount >= 12) { _maxThrowsReached(); return; }
     // Close enough to just pick it up?
     if (Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z) < 1.4) pickUpDisc();
     else startWalking(true);
   }, 1100);
+}
+
+// 12 throws used (landed or lost out of bounds): the hole is over
+function _maxThrowsReached() {
+  if (holeScores[holeIdx] === undefined || holeScores[holeIdx] === null) {
+    holeScores[holeIdx] = throwCount;
+    totalVsPar += throwCount - HOLES[holeIdx].par;
+  }
+  myHoleDone = true;
+  playerDone[myIdx]   = true;
+  playerThrows[myIdx] = throwCount;
+  if (mpMode) {
+    sendToAll({ t: "givenup", from: myIdx, throws: throwCount, hole: holeIdx, dnf: 1 });
+    BT.onScore(myIdx, throwCount, { dnf: 1 });
+    if (!mpScoreRecorded[myIdx]) { mpTotals[myIdx] += throwCount - HOLES[holeIdx].par; mpScoreRecorded[myIdx] = true; }
+    updateMpUI();
+    if (BT.on() && !checkAllDone()) { showMsg("MAX THROWS", "No points this hole \u2014 go wreck the others!", null); BT.goRoam(); }
+    else if (!checkAllDone()) {
+      const watchIdx = playerDone.findIndex((d, i) => !d && i < playerCount);
+      setSpectating(true, watchIdx);
+      showMsg("MAX THROWS", "Watching others finish\u2026", null);
+    }
+  } else {
+    showMsg("MAX THROWS", "12 throws reached \u2014 moving on!", "Next Hole \u2192");
+  }
 }
 
 // ── WALK → PICK UP ───────────────────────────────────────────────────────────
@@ -988,6 +1018,7 @@ var _pickupArmed = true;
 var _aimSince = 0;          // T when the player last got the disc in hand
 function startWalking(afterThrow) {
   if (!HOLES[holeIdx] || spectatingOpp) return;
+  TIPS.show("walk", null, 600);
   phase = "WALKING";
   _pickupArmed = !!afterThrow;
   dragging = false; document.body.classList.remove("aiming");
@@ -1000,6 +1031,7 @@ function startWalking(afterThrow) {
 }
 function pickUpDisc() {
   var h = HOLES[holeIdx]; if (!h) return;
+  if (typeof RAG !== "undefined" && RAG.me) RAG.stop(localAvatarMesh, false);   // get up to take the next shot
   if (typeof VEH !== "undefined" && VEH.mySeat) VEH.exit();
   var C = h.course, g = C.heightAt(discPos.x, discPos.z);
   phase = "AIMING"; _aimSince = T;
@@ -1053,6 +1085,7 @@ function _buildDiscMarker() {
 
 function outOfBounds(isTimeout) {
   if (!HOLES[holeIdx]) return;
+  LOG.ev("ob", { x: Math.round(discPos.x), z: Math.round(discPos.z), theme: HOLES[holeIdx].theme, hole: holeIdx, who: isTimeout ? "timeout" : "disc" });
   phase = "SCORED";
   throwCount++;
   var h2 = HOLES[holeIdx];
@@ -1065,7 +1098,7 @@ function outOfBounds(isTimeout) {
   var _hz = h2.course ? h2.course.hazardAt(discPos.x, discPos.z).type : "water";
   var hazardMsg = isTimeout ? "Lost in the void"
     : _hz === "lava" ? "Into the lava"
-    : _hz === "void" ? (h2.theme === "moon" ? "Down the crater" : "Lost in the void")
+    : _hz === "void" ? (h2.theme === "moon" ? "Down the crater" : h2.theme === "bouncy" ? "Into the ball pit!" : "Lost in the void")
     : _hz === "none" || _hz === "ob" ? "Out of bounds"
     : h2.theme === "poolrooms" ? "Into the pool"
     : "Water hazard";
@@ -1077,6 +1110,7 @@ function outOfBounds(isTimeout) {
   setTimeout(() => {
     if (phase !== "SCORED") return;
     hideMsg();
+    if (throwCount >= 12) { _maxThrowsReached(); return; }   // out of throws: no endless splashing from the same lie
     // Back to the lie the disc was thrown from (where the player is standing)
     var _rp = (typeof throwHistory !== "undefined" && throwHistory.length > 0)
       ? throwHistory[throwHistory.length - 1].pos.clone()
@@ -1111,6 +1145,10 @@ function setDifficulty(v) {
 
 // ── ADVANCE HOLE — single player ─────────────────────────────────────────────
 function advanceHole() {
+  // only from a finished hole (holed out or out of throws), and once per hole
+  if (holeScores[holeIdx] === null || holeScores[holeIdx] === undefined) return;
+  if (window._advancedFrom === holeIdx + "_" + matchSeed) return;
+  window._advancedFrom = holeIdx + "_" + matchSeed;
   var next = holeIdx + 1;
   if (next >= HOLE_COUNT) {
     hideMsg();
@@ -1141,23 +1179,22 @@ function showFinalScorecard() {
     rows[1].push("<td>" + par + "</td>");
     rows[2].push("<td><span class='sc " + cls + "'>" + (sc == null ? "–" : sc) + "</span></td>");
   }
-  el.innerHTML = "<div class='sheet'>" +
-    "<div class='fc-title'>Round complete</div>" +
-    "<div class='fc-total " + (totalVsPar < 0 ? "under" : totalVsPar > 0 ? "over" : "even") + "'>" + _fmtPar(totalVsPar) + "</div>" +
+  var cur = POD.saveRound(totalVsPar);
+  var html = "<div class='fc-total " + (totalVsPar < 0 ? "under" : totalVsPar > 0 ? "over" : "even") + "'>" + _fmtPar(totalVsPar) + "</div>" +
     "<div class='fc-sub'>" + totThr + " throws · par " + totPar + " · " + HOLE_COUNT + " holes · " + DIFFICULTY + (isBest ? " · <b>New personal best!</b>" : " · best " + _fmtPar(prevBest)) + "</div>" +
     "<div class='fc-scroll'><table class='fc-table'><tr><th>Hole</th>" + rows[0].join("") + "</tr><tr><td>Par</td>" + rows[1].join("") + "</tr><tr><td>You</td>" + rows[2].join("") + "</tr></table></div>" +
+    POD.bestBoard(cur) +
     (typeof PF !== "undefined" ? PF.roundEnd(totalVsPar) : "") +
-    "<div class='fc-stats'>Lifetime · " + dgStats.holes + " holes · " + dgStats.aces + " aces · " + dgStats.birdies + " birdies · longest throw " + dgStats.longest + " m</div>" +
-    "<div class='fc-actions'><button class='btn primary big' onclick='_fcAgain()'>Play again</button><button class='btn big' onclick='_fcMenu()'>Main menu</button></div>" +
-    "</div>";
-  el.style.display = "flex";
-  AudioEngine.stinger("round");
-  if (typeof celebrateAce === "function" && isBest) celebrateAce(basketWP.clone());
+    "<div class='fc-stats'>Lifetime · " + dgStats.holes + " holes · " + dgStats.aces + " aces · " + dgStats.birdies + " birdies · longest throw " + dgStats.longest + " m</div>";
+  POD.show([{ i: myIdx, name: playerNames[myIdx] || "You", score: _fmtPar(totalVsPar), sub: totThr + " throws" }], {
+    title: isBest ? "New personal best!" : totalVsPar < 0 ? "Under par!" : totalVsPar === 0 ? "Level par" : "Round complete",
+    mood: isBest || totalVsPar < 0 ? "win" : totalVsPar === 0 ? "clap" : "sad", html: html,
+    actions: "<button class='btn primary big' onclick='POD.again()'>Play again</button><button class='btn big' onclick='POD.toMenu()'>Main menu</button>" });
 }
 function _fcHide() { var el = document.getElementById("final-card"); if (el) el.style.display = "none"; }
 function _fcAgain() { _fcHide(); startSPWithTheme(_SP_FORCED_THEME); }
 function _fcMenu() {
-  _fcHide();
+  _fcHide(); if (typeof POD !== "undefined") POD.hide();
   hideMsg();
   document.getElementById("menu").style.display = "flex";
   document.getElementById("ui").style.display   = "none";
@@ -1187,7 +1224,7 @@ function showMenuBackdrop() {
   old.forEach(function(o) { GFX.disposeTree(o); });
   if (typeof _glbMixers !== "undefined") _glbMixers.length = 0;
   [discMesh, localAvatarMesh, fpHandMesh, trailMesh, trajLandRing, discMarker].forEach(function(o) { if (o) o.visible = false; });
-  ENT.clear(); document.body.classList.remove("walking");
+  ENT.clear(); GAD.clear(); RAG.clear(); document.body.classList.remove("walking");
   var _wh = document.getElementById("walk-hud"); if (_wh) _wh.classList.remove("on");
   (trajDots || []).forEach(function(d) { d.visible = false; });
   remotePlayers.forEach(function(rp) {
@@ -1218,6 +1255,7 @@ function showMenuBackdrop() {
   currentBasket = b;
   GFX.upgradeMaterials(courseGrp);
   _menuBackdrop = true;
+  if (typeof MENU3D !== "undefined") MENU3D.build();   // your golfer, hanging out by the menu
 }
 function _menuCamera(t) {
   var a = t * 0.035 + 0.6;
@@ -1350,10 +1388,10 @@ function startSPWithTheme(theme) {
 var MAP_POOLS = {
   all:null,
   spooky:["eerie","terrifying","backrooms","screaming_mamamia","poolrooms","hogwarts"],
-  funny:["funny","feet_bunnies","socks_basket","public_poo","minion","emote","minecraft"],
+  funny:["funny","feet_bunnies","socks_basket","public_poo","minion","emote","minecraft","bouncy"],
   urban:["city","office","disco","neon","geometry_dash"],
-  nature:["mountains","winter","waterfall","cabbage","village","grandcanyon"],
-  new:["poolrooms","hogwarts","village","minecraft","skyblock"],
+  nature:["mountains","winter","waterfall","cabbage","village","grandcanyon","jungle"],
+  new:["jungle","bouncy","poolrooms","hogwarts","village","minecraft","skyblock"],
 };
 function setMapPool(name){
   ACTIVE_THEMES=MAP_POOLS[name]||null;
@@ -1383,7 +1421,7 @@ var MAP_DISPLAY_NAMES = {
   sixtyseven:"67️⃣ Sixty Seven", winter:"❄️ Winter", moon:"🌙 Moon", office:"🏢 Office",
   cabbage:"🥬 Cabbage", minion:"💛 Minion", map67:"67️⃣ Map67", grandcanyon:"🏜️ Canyon",
   tornado:"🌪️ Tornado", waterfall:"💧 Waterfall", poolrooms:"🏊 Poolrooms",
-  hogwarts:"⚡ Hogwarts", village:"🏡 Village", minecraft:"⛏️ Minecraft", skyblock:"🌤️ Skyblock",
+  hogwarts:"⚡ Hogwarts", village:"🏡 Village", minecraft:"⛏️ Minecraft", skyblock:"🌤️ Skyblock", bouncy:"🎈 Bouncy Castle", jungle:"🦖 Dino Jungle",
   vetschool:"🐾 Vet School",
 };
 
@@ -1461,10 +1499,12 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   T += dt;
+  INPUT.update(dt);
 
   // Always update GLB mixers — must happen before any early return
   ANIM.restore();   // undo last frame's head turns before the clips pose the bones again
-  if (typeof _glbMixers !== "undefined") _glbMixers.forEach(function(m){m.update(dt);});
+  var _ak = CINE.animK();   // hit-stop freezes, bullet time slows every animation
+  if (typeof _glbMixers !== "undefined") _glbMixers.forEach(function(m){m.update(dt * _ak);});
   if (typeof COS !== "undefined") COS.tick(T);
 
   // ── Remote player walk animations (render-rate, state-machine) ──────────────
@@ -1484,7 +1524,9 @@ function animate() {
         if (typeof switchAvatarAnim === "function") switchAvatarAnim(mesh, _want);
       }
       var _air = rp.body && HOLES[holeIdx] ? rp.body.y - terrainY(rp.body.x, rp.body.z, HOLES[holeIdx], holeIdx) > 0.35 : false;
-      ANIM.drive(mesh, _rvm, dt, { grounded: !_air, ko: rp.anim === "death" });
+      ANIM.drive(mesh, _rvm, dt, { grounded: !_air, ko: rp.anim === "death", flail: true });
+      // their footsteps, placed in 3D (you hear who's sneaking up behind you)
+      if (!_air && _rvm > 0.8 && rp.body) { rp._stepAcc = (rp._stepAcc || 0) + dt * _rvm / (_rvm > 5.6 ? 2.0 : 1.5); if (rp._stepAcc > 1) { rp._stepAcc = 0; AudioEngine.sfx("step", 0.45, rp.body); } }
       // they watch their own disc in flight, otherwise whoever is closest
       var _lt = rp.flying ? rp.discPos : ANIM.nearestFace(rp.body, mesh);
       ANIM.look(mesh, _lt, dt);
@@ -1496,8 +1538,10 @@ function animate() {
   // While in MENU or before a hole is loaded, just render and return
   if (phase === "MENU" || !HOLES[holeIdx]) {
     if (_covered) return;
-    if (typeof _lobby3D !== "undefined" && _lobby3D) { _lobbyTick(dt); updateParticles(dt); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
-    else if (_menuBackdrop && phase === "MENU") { _menuCamera(T); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    if (typeof POD !== "undefined" && POD.on) { POD.tick(dt); updateParticles(dt); }
+    else if (typeof _lobby3D !== "undefined" && _lobby3D) { _lobbyTick(dt); updateParticles(dt); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    else if (_menuBackdrop && phase === "MENU") { if (typeof MENU3D !== "undefined") { MENU3D.tick(dt); updateParticles(dt); } else _menuCamera(T); if (typeof updateBasketFX === "function") updateBasketFX(dt); }
+    if (CINE.bars > 0) { CINE.bars = 0; CINE.stopT = 0; CINE._barsDom(); }
     AudioEngine.updateFlight(false, 0, false);
     GFX.update(dt, null);
     GFX.render();
@@ -1511,6 +1555,7 @@ function animate() {
   // World simulation: moving / crumbling platforms, rising tide, animated lights, critters
   if (_C) _C.update(netTime(), dt);
   ENT.update(dt);
+  GAD.update(dt);
 
   if (phase === "AIMING" && introT <= 0) {
     var _rs = 1.4 * dt;
@@ -1571,7 +1616,7 @@ function animate() {
   } else if (phase === "WALKING" && _C) {
     if (_punchCooldown > 0) _punchCooldown -= dt;
     if (typeof _tickPunchTimers === "function") _tickPunchTimers(dt);
-    if ((keys.r || keys.R) && _punchCooldown <= 0 && mpMode) { _punchCooldown = 1.2; keys.r = keys.R = false; _doPunch(); }
+    if ((keys.r || keys.R) && _punchCooldown <= 0) { _punchCooldown = 1.2; keys.r = keys.R = false; _doPunch(); }
     PL.update(dt);
     var _dd = Math.hypot(discPos.x - PL.pos.x, discPos.z - PL.pos.z);
     if (_dd > 2.4) _pickupArmed = true;
@@ -1609,7 +1654,15 @@ function animate() {
     if (o.solid !== false && hd < o.r + 0.25 && discPos.y < o.h + _ob && discPos.y > _ob - 0.3) {
       const nx = dx / hd, nz = dz / hd;
       const dot = discVel.x * nx + discVel.z * nz;
-      if (dot < 0) {
+      // beaning a bystander: they go limp and the disc ricochets off them
+      if (dot < -3 && o.update && !o.rag && o.mesh && /jogger|dancer|critter|minion|knight|robot/.test(o.type) && discVel.length() > 7 && ENT.ragdoll(o, discVel.x * 0.45, 4.5, discVel.z * 0.45)) {
+        AudioEngine.sfx("bonk", 0.9, discPos); _spawnBonkText(new THREE.Vector3(o.x, (o.worldY || 0) + 2.2, o.z), "BONK!");
+        (function(oo) { CINE.react(function() { var p = RAG.pelvis(oo.mesh); return p ? p.clone() : new THREE.Vector3(oo.x, (oo.worldY || 0) + 0.8, oo.z); }, "BONK!", 2.2); })(o);
+        if (typeof CINE !== "undefined") CINE.hitStop(0.08);
+        if (typeof AudioEngine.crowd === "function") AudioEngine.crowd("laugh");
+      }
+      if (dot < 0 && ((typeof PU !== "undefined" && PU.discMod === "sticky") || (typeof ARS !== "undefined" && ARS.sticks()))) { discVel.x = 0; discVel.z = 0; discVel.y = Math.min(discVel.y, 0) - 0.5; if (typeof ARS !== "undefined") ARS.splat(discPos); }
+      else if (dot < 0) {
         discVel.x -= 1.6 * dot * nx;
         discVel.z -= 1.6 * dot * nz;
         discVel.y  = Math.abs(discVel.y) * 0.4 + 2;
@@ -1626,19 +1679,24 @@ function animate() {
   if (typeof VEH !== "undefined") VEH.update(dt);
   if (typeof WORLD !== "undefined") WORLD.update(performance.now() / 1000);
   LIFE.update(dt, T);
+  FEEL.update(dt);
   if(_screenShakeT>0){_screenShakeT-=dt;_screenShake*=Math.pow(0.82, dt*60);if(_screenShakeT<=0)_screenShake=0;}
   updateCamera(dt);
+  CINE.update(dt);
   CAMFX.update(dt);
+  AudioEngine.listen(camera);
   _updateOccluders(dt);
   if (typeof updateBasketFX === "function") updateBasketFX(dt);
   if (trajLandRing && !(phase === "AIMING" && dragging)) trajLandRing.visible = false;
   updateTrail(discPos, phase === "FLYING");
-  updateParticles(dt);
+  updateParticles(dt * Math.max(0.15, _ak));
   updateRain(dt);
   checkPowerupCollection();
 
   PU.update(dt);
   BT.update(dt);
+  EMOTE.update();
+  ARS.tick();
   if (BT.stunT > 0 && phase !== "WALKING" && phase !== "MENU" && _C) PL.update(dt);
 
 
@@ -1676,7 +1734,9 @@ function animate() {
     var _lhz = _C ? _C.hazardAt(discPos.x, discPos.z) : null;
     if (_lhz && _gndNow < _lhz.level) { PL.fall(_lhz.type); outOfBounds(false); }
     PL.applyAvatar(dt);
-    PL._setAnim("idle");
+    // wind-up follows the power meter; otherwise idle (unless an emote or the release is playing)
+    if (dragging) { PL.emoteT = 0; PL._setAnim("throwwind"); ANIM.scrub(localAvatarMesh, throwPower); ANIM.coil(localAvatarMesh, Math.pow(throwPower, 0.8)); }
+    else if (!(PL.emoteT > T) && T > (PL._lockAnim || 0)) PL._setAnim("idle");
     if (localAvatarMesh && !localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) localAvatarMesh.children[7].rotation.z = -0.55 - throwPower * 0.7;
     if (discMesh) {
       discMesh.visible = cameraMode === "tp";
@@ -1690,6 +1750,7 @@ function animate() {
     }
   } else if (phase === "WALKING" || phase === "LANDED" || phase === "FLYING" || phase === "SCORED") {
     PL.applyAvatar(dt);
+    if (phase === "FLYING" && PL.anim === "throwrelease" && T > (PL._lockAnim || 0)) PL._setAnim("idle");
     if (phase === "FLYING" && localAvatarMesh && !localAvatarMesh.userData.glbLoaded && localAvatarMesh.children[7]) localAvatarMesh.children[7].rotation.z = -1.3;
     if ((phase === "WALKING" || phase === "LANDED") && discMesh && !BT.finished) {
       // The disc lies on the ground where it stopped (or dangles from a thief)
@@ -1702,11 +1763,23 @@ function animate() {
   }
   if (localAvatarMesh && localAvatarMesh.userData.glbLoaded) {
     var _ws = phase === "WALKING" ? Math.hypot(PL.vel.x, PL.vel.z) : 0;
-    ANIM.drive(localAvatarMesh, _ws, dt, { grounded: PL.onGround || (phase !== "WALKING" && BT.stunT <= 0), fidget: phase === "WALKING" && !BT.locked(), ko: BT.stunT > 0 && BT.frozenT <= 0 });
+    ANIM.drive(localAvatarMesh, _ws, dt, { grounded: PL.onGround || (phase !== "WALKING" && BT.stunT <= 0), fidget: phase === "WALKING" && !BT.locked(), ko: BT.stunT > 0 && BT.frozenT <= 0, flail: phase === "WALKING" });
+    if (phase === "AIMING" && cameraMode === "tp" && discMesh) ANIM.holdDisc(localAvatarMesh, discMesh, 0.54 * DISC_SCALE_HAND * 1.15);   // gripped by the rim in the throwing hand
     // eyes on the disc while it flies, down the line while aiming, otherwise on whoever's near
     var _lookAt = phase === "FLYING" ? discPos : phase === "AIMING" ? new THREE.Vector3(PL.pos.x + Math.sin(aimAngle) * 20, PL.pos.y + 1.5, PL.pos.z - Math.cos(aimAngle) * 20) : ANIM.nearestFace(PL.pos, localAvatarMesh);
     if (!BT.locked()) ANIM.look(localAvatarMesh, _lookAt, dt);
   }
+  // everyone else holds their disc while they line up a throw (it used to just vanish)
+  if (mpMode) remotePlayers.forEach(function(rp) {
+    if (!rp || !rp.discMesh || rp.flying || !rp.body || !rp.avatarMesh || !rp.avatarMesh.visible) return;
+    if (Math.hypot(rp.discPos.x - rp.body.x, rp.discPos.z - rp.body.z) > 1.5 || rp.anim === "death") return;
+    rp.discMesh.scale.setScalar(DISC_SCALE_HAND * 1.15);
+    rp.discMesh.visible = ANIM.holdDisc(rp.avatarMesh, rp.discMesh, 0.54 * DISC_SCALE_HAND * 1.15);
+  });
+  RAG.update(dt * _ak);   // limp bodies override the animated pose (players + NPCs)
+  // … so anyone knocked limp while holding a disc takes it along (the grips above used the animated pose)
+  if (phase === "AIMING" && cameraMode === "tp" && discMesh && localAvatarMesh && RAG.active(localAvatarMesh)) ANIM.holdDisc(localAvatarMesh, discMesh, 0.54 * DISC_SCALE_HAND * 1.15);
+  if (mpMode) remotePlayers.forEach(function(rp) { if (rp && rp.discMesh && rp.discMesh.visible && !rp.flying && rp.avatarMesh && RAG.active(rp.avatarMesh)) ANIM.holdDisc(rp.avatarMesh, rp.discMesh, 0.54 * DISC_SCALE_HAND * 1.15); });
   if (!discMarker) { discMarker = _buildDiscMarker(); scene.add(discMarker); }
   if (BT.finished) discMarker.visible = false;
   if (discMarker.visible) {
@@ -1755,7 +1828,7 @@ function animate() {
   AudioEngine.updateFlight(phase === "FLYING", discVel.length(), timeScale < 0.75);
   var _focus = (phase === "FLYING") ? discPos : PL.pos;
   GFX.update(dt, _focus);
-  if (!_covered) GFX.render();
+  if (!_covered) { GFX.render(); CINE.pipRender(dt); }
 }
 
 initMenuDecor();

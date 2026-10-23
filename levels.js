@@ -69,6 +69,7 @@ LV.build = function(hole, idx) {
   var d = Math.min(1, idx / 12);          // difficulty 0 → 1 over the first 12 holes
   var spawns = [];
   LV[arch](c, hole, idx, d, spawns);
+  if (LV.post && LV.post[hole.theme]) LV.post[hole.theme](c, hole, idx, d, spawns);   // theme extras on top of an archetype (levels5.js)
   // Common finishing: route length, par, mods
   var len = 0;
   for (var i = 1; i < c.route.length; i++) len += Math.hypot(c.route[i].x - c.route[i - 1].x, c.route[i].z - c.route[i - 1].z);
@@ -458,6 +459,7 @@ LV.dressMeadow = function(c, hole, pts, fw, rivers) {
     winter:       { snowpine: 3, rock: 2 },
     grandcanyon:  { shrub: 3, rock: 3 },
     waterfall:    { bush: 3, tree: 1.5, rock: 2, flowers: 2, fern: 2 },
+    jungle:       { fern: 5, bush: 3, tree: 2, rock: 1.5, mushroom: 1.5, flowers: 1 },
   }[th];
   if (!kit) return;
   var kinds = Object.keys(kit), tot = kinds.reduce(function(a, k) { return a + kit[k]; }, 0);

@@ -38,7 +38,36 @@ VEH.spawnFor = function(h) {
     if (ok) best = { x: x, y: g0, z: z, yaw: yaw };
   }
   if (!best) return;
-  VEH.cars.push(VEH.make(0, best));
+  // city streets get the Celica; everywhere else an oversized, bouncy golf cart (+ stunt ramps)
+  var kind = h.arch === "city" ? "celica" : "cart";
+  VEH.cars.push(VEH.make(0, best, kind));
+  if (kind === "cart") VEH.ramps(C);
+};
+// Stunt ramps beside the fairway (deterministic: same on every screen)
+VEH.ramps = function(C) {
+  var R = C.route, mat = VEH._rampMat();
+  [0.3, 0.62].forEach(function(t, i) {
+    for (var k = 0; k < 6; k++) {
+      var p = LV.pointAt(R, t + k * 0.03), side = (i + k) % 2 ? 1 : -1, off = 8 + (k % 3) * 2;
+      var x = p.x - p.dz * off * side, z = p.z + p.dx * off * side, g = C.heightAt(x, z), yaw = Math.atan2(p.dx, p.dz), ok = true;
+      for (var q = -3; q <= 3 && ok; q++) for (var w = -1; w <= 1 && ok; w++) {
+        var qx = x + Math.sin(yaw) * q * 1.4 + Math.cos(yaw) * w * 1.6, qz = z + Math.cos(yaw) * q * 1.4 - Math.sin(yaw) * w * 1.6;
+        if (Math.abs(C.heightAt(qx, qz) - g) > 0.25 || C.hazardAt(qx, qz).level > g - 0.3 || !C.inBounds(qx, qz)) ok = false;
+      }
+      if (!ok) continue;
+      C.box({ x: x, z: z, w: 3.4, d: 6, top: g + 0.05, top2: g + 1.9, bottom: g - 0.3, ramp: true, rot: yaw, mat: mat, kind: "ramp", surf: "wood" });
+      break;
+    }
+  });
+};
+VEH._rampMat = function() {
+  if (VEH._rm) return VEH._rm;
+  var c = document.createElement("canvas"); c.width = c.height = 128; var x = c.getContext("2d");
+  x.fillStyle = "#ffcf2a"; x.fillRect(0, 0, 128, 128); x.fillStyle = "#1a1a22";
+  for (var i = -2; i < 6; i++) { x.beginPath(); x.moveTo(i * 32, 0); x.lineTo(i * 32 + 16, 0); x.lineTo(i * 32 + 16 + 128, 128); x.lineTo(i * 32 + 128, 128); x.fill(); }
+  var t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.wrapS = t.wrapT = THREE.RepeatWrapping; t._dgShared = true;
+  VEH._rm = new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }); VEH._rm.userData.shared = true;
+  return VEH._rm;
 };
 VEH._footprint = function(x, z, yaw) {
   var s = Math.sin(yaw), c = Math.cos(yaw), out = [];
@@ -49,12 +78,20 @@ VEH._footprint = function(x, z, yaw) {
   return out;
 };
 
-VEH.make = function(id, at) {
+VEH.make = function(id, at, kind) {
   var root = new THREE.Group();
   root.position.set(at.x, at.y, at.z); root.rotation.y = at.yaw;
   var body = new THREE.Group(); root.add(body);      // pitch / roll / suspension bob live here
   var car = { id: id, root: root, body: body, model: null, wheels: [], pos: new THREE.Vector3(at.x, at.y, at.z), yaw: at.yaw, speed: 0, steer: 0, vy: 0,
-    pitch: 0, roll: 0, onGround: true, seats: [null, null, null, null], safe: new THREE.Vector3(at.x, at.y, at.z), safeYaw: at.yaw, net: null, lastSend: 0, driftT: 0 };
+    pitch: 0, roll: 0, onGround: true, seats: [null, null, null, null], safe: new THREE.Vector3(at.x, at.y, at.z), safeYaw: at.yaw, net: null, lastSend: 0, driftT: 0,
+    kind: kind || "celica", vx: 0, vz: 0, susY: 0, susV: 0, pV: 0, rV: 0, slopeV: 0, gPrev: at.y, rattle: 0 };
+  if (car.kind === "cart") {
+    VEH.buildCart(car, body);
+    courseGrp.add(root);
+    car.ent = { type: "car_vehicle", mesh: root, x: at.x, z: at.z, y: at.y, worldY: at.y, r: 2.0, h: 2.6, solid: true, update: null, t: 0, isCar: true };
+    if (typeof ENT !== "undefined") ENT.list.push(car.ent);
+    return car;
+  }
   // placeholder box until the GLB arrives
   var ph = new THREE.Mesh(new THREE.BoxGeometry(VEH.HALF_W * 2, 1.4, VEH.HALF_L * 2), new THREE.MeshStandardMaterial({ color: 0xd83a2a }));
   ph.position.y = 0.9; body.add(ph);
@@ -90,6 +127,41 @@ VEH.make = function(id, at) {
   car.ent = { type: "car_vehicle", mesh: root, x: at.x, z: at.z, y: at.y, worldY: at.y, r: 2.0, h: 2.0, solid: true, update: null, t: 0, isCar: true };
   if (typeof ENT !== "undefined") ENT.list.push(car.ent);
   return car;
+};
+
+// ── The golf cart: built in body space at the Celica's footprint (so it's comically big) ──
+VEH.buildCart = function(car, body) {
+  var cols = [0x5ad8b8, 0xff7aa8, 0xffc23a, 0x6aa8ff], acc = cols[Math.floor(Math.abs(car.pos.x * 7 + car.pos.z * 3)) % cols.length];
+  var M = function(c, o) { return ENT.mat(c, o); }, white = M(0xf6f4ee, { roughness: 0.35 }), A = M(acc, { roughness: 0.4 }), dark = M(0x23252c, { roughness: 0.8 }), chrome = M(0xd8dde6, { metalness: 0.9, roughness: 0.2 }), seat = M(0x8a4a2a, { roughness: 0.6 });
+  var add = function(geo, mat, x, y, z, p) { var m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; (p || body).add(m); return m; };
+  add(new THREE.BoxGeometry(2.7, 0.35, 6.4), white, 0, 0.78, -0.1);                                  // chassis tub
+  add(new THREE.BoxGeometry(2.8, 0.12, 6.6), A, 0, 0.6, -0.1);                                       // accent skirt
+  var hood = add(new THREE.SphereGeometry(1.4, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), white, 0, 0.95, 2.2); hood.scale.set(1, 0.42, 0.9);
+  add(new THREE.BoxGeometry(2.6, 0.5, 0.25), A, 0, 1.0, 3.35);                                       // bumper
+  [-0.7, 0.7].forEach(function(x) { add(new THREE.SphereGeometry(0.2, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }), x, 1.12, 3.28); });   // headlights
+  [[-0.65, 0], [-1.78, 0]].forEach(function(r) {                                                     // two benches
+    add(new THREE.BoxGeometry(2.3, 0.3, 0.95), seat, 0, 1.18, r[0]);
+    add(new THREE.BoxGeometry(2.3, 0.9, 0.18), seat, 0, 1.6, r[0] - 0.5);
+  });
+  var col = add(new THREE.CylinderGeometry(0.05, 0.05, 0.8, 8), dark, 0.47, 1.55, 0.05); col.rotation.x = -0.6;
+  var wheel = add(new THREE.TorusGeometry(0.26, 0.05, 8, 20), dark, 0.47, 1.9, -0.2); wheel.rotation.x = -0.95;
+  [[-1.2, 1.0], [1.2, 1.0], [-1.2, -2.35], [1.2, -2.35]].forEach(function(q) { add(new THREE.CylinderGeometry(0.07, 0.07, 2.3, 8), chrome, q[0], 2.05, q[1]); });   // canopy posts
+  var roof = add(new THREE.BoxGeometry(2.9, 0.16, 3.9), A, 0, 3.2, -0.68); var stripe = add(new THREE.BoxGeometry(2.92, 0.17, 0.4), white, 0, 3.2, -0.68);
+  for (var b = 0; b < 3; b++) {                                                                       // golf bags on the back
+    var bag = add(new THREE.CylinderGeometry(0.22, 0.2, 1.1, 12), b % 2 ? A : M(0x2a6ad8), -0.6 + b * 0.6, 1.55, -2.95); bag.rotation.x = 0.25;
+    add(new THREE.SphereGeometry(0.12, 8, 6), chrome, -0.6 + b * 0.6, 2.2, -3.1);
+  }
+  var pole = add(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 6), chrome, 1.25, 4.3, -2.35);
+  var flag = add(new THREE.PlaneGeometry(0.9, 0.55, 6, 1), new THREE.MeshStandardMaterial({ color: 0xff3a3a, side: THREE.DoubleSide, roughness: 0.6 }), 1.7, 5.2, -2.35); car.flag = flag;
+  // big cartoon wheels in steer + spin pivots
+  [[1.24, 2.0, true], [-1.24, 2.0, true], [1.24, -2.0, false], [-1.24, -2.0, false]].forEach(function(w) {
+    var steer = new THREE.Group(), spin = new THREE.Group(); steer.position.set(w[0], 0.58, w[1]); steer.add(spin); body.add(steer);
+    var tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.5, 20), dark); tyre.rotation.z = Math.PI / 2; tyre.castShadow = true; spin.add(tyre);
+    var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.52, 12), chrome); hub.rotation.z = Math.PI / 2; spin.add(hub);
+    var spoke = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.08, 0.5), A); spin.add(spoke);
+    car.wheels.push({ steer: steer, spin: spin, front: w[2], axle: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0), ang: 0 });
+  });
+  car.model = body;
 };
 
 // The body is a closed shell whose top sits above the seats (the roof hid it). Cut the cabin
@@ -155,7 +227,7 @@ VEH.toggle = function() {
   if (car.seats[seat] && car.seats[seat].kind === "ent") VEH.unseatEnt(car, seat);
   car.seats[seat] = { kind: "player", idx: myIdx };
   VEH.mySeat = { car: car, seat: seat };
-  if (seat === 0) { car.net = null; VEH.engineStart(); }
+  if (seat === 0) { car.net = null; VEH.engineStart(car.kind); car.vx = car.vz = 0; }
   AudioEngine.sfx("pickup");
   _flashPrompt(seat === 0 ? "🚗 You're driving! W/S gas · A/D steer · Space drift · E get out" : "🚗 Riding along — E to get out");
   PL._setAnim("idle");
@@ -208,6 +280,15 @@ VEH.update = function(dt) {
     // visuals
     car.root.position.copy(car.pos); car.root.rotation.y = car.yaw;
     car.body.rotation.x = car.pitch; car.body.rotation.z = car.roll;
+    if (car.kind === "cart" && dt > 0) {
+      var vyN = (car.pos.y - (car._py === undefined ? car.pos.y : car._py)) / dt; car._py = car.pos.y;
+      if (!iDrive) car.susV -= (vyN - (car._pvy || 0)) * 0.08; car._pvy = vyN;
+      car.susV += (-car.susY * 110 - car.susV * 6.5) * dt; car.susY = Math.max(-0.45, Math.min(0.45, car.susY + car.susV * dt));
+      car.body.position.y = car.susY;
+      if (car.flag) car.flag.rotation.y = Math.sin(T * 9 + car.id) * 0.35 - Math.min(0.9, Math.abs(car.speed) * 0.04);
+      var asp = Math.abs(car.speed);
+      if (asp > 2 && (car.rattle -= dt) <= 0) { car.rattle = 0.07 + Math.random() * 0.1 + 0.6 / (asp + 2); AudioEngine.sfx("rattle", Math.min(1, asp / 16) * (car.onGround ? 0.7 : 0.25), car.pos); }
+    }
     car.wheels.forEach(function(w) {
       w.ang += car.speed * dt / (0.33 * VEH.SCALE);
       w.spin.quaternion.setFromAxisAngle(w.axle, w.ang);                 // roll around the axle
@@ -232,7 +313,7 @@ VEH.drive = function(car, C, dt) {
   if (keys.d || keys.D || keys.ArrowRight) r += 1;
   if (keys.a || keys.A || keys.ArrowLeft) r -= 1;
   if (PL.stick.active) { f = -PL.stick.y; r = PL.stick.x; }
-  var hand = !!keys[" "] || PL.jumpHeld, MAX = 24, REV = 8, grav = 22 * (C.gravity || 1);
+  var cart = car.kind === "cart", hand = !!keys[" "] || PL.jumpHeld, MAX = cart ? 21 : 24, REV = 8, grav = (cart && !car.onGround ? 12.5 : 22) * (C.gravity || 1);
   // throttle / brake / reverse
   if (f > 0) car.speed += (car.speed < 0 ? 30 : 15) * f * dt;
   else if (f < 0) car.speed += (car.speed > 0 ? -30 : -10) * -f * dt;
@@ -242,18 +323,28 @@ VEH.drive = function(car, C, dt) {
   // steering: tighter at low speed, a lazy drift with the handbrake
   var st = -r * 0.55 * (1 - Math.min(0.55, Math.abs(car.speed) / 45));   // A = left (+yaw), D = right (-yaw)
   car.steer += (st - car.steer) * Math.min(1, dt * 8);
-  var yawRate = car.speed * Math.tan(car.steer) / (2 * VEH.WHEEL_Z) * (hand ? 1.7 : 1) * (car.onGround ? 1 : 0.3);
+  var yawRate = car.speed * Math.tan(car.steer) / (2 * VEH.WHEEL_Z) * (hand ? (cart ? 2.6 : 1.7) : (cart ? 1.25 : 1)) * (car.onGround ? 1 : 0.3);
   car.yaw += yawRate * dt;
-  if (hand && Math.abs(car.speed) > 8 && Math.abs(r) > 0) { car.driftT += dt; if (car.driftT > 0.08) { car.driftT = 0; VEH.smoke(car); } }
+  // the cart's velocity lags its heading: tyres grip loosely, the handbrake lets go entirely → big drifts
+  var hx = Math.sin(car.yaw) * car.speed, hz = Math.cos(car.yaw) * car.speed;
+  if (cart) {
+    var grip = car.onGround ? (hand ? 1.1 : 4.2) : 0.12;
+    car.vx += (hx - car.vx) * Math.min(1, dt * grip); car.vz += (hz - car.vz) * Math.min(1, dt * grip);
+    var vl = Math.hypot(car.vx, car.vz), slip = vl > 1 ? Math.abs(Math.atan2(car.vx * hz - car.vz * hx, car.vx * hx + car.vz * hz)) : 0;
+    if (slip > 0.32 && vl > 6 && car.onGround) {
+      car.driftT += dt; car.driftHold = (car.driftHold || 0) + dt;
+      if (car.driftT > 0.06) { car.driftT = 0; VEH.smoke(car); if (Math.random() < 0.3) AudioEngine.sfx("swipe", 0.25); }
+      if (car.driftHold > 1.1 && !car.driftCalled) { car.driftCalled = true; if (typeof CINE !== "undefined") CINE.callout("DRIFT!", "hot"); }
+    } else { car.driftHold = 0; car.driftCalled = false; }
+  } else { car.vx = hx; car.vz = hz; if (hand && Math.abs(car.speed) > 8 && Math.abs(r) > 0) { car.driftT += dt; if (car.driftT > 0.08) { car.driftT = 0; VEH.smoke(car); } } }
   // move in substeps with collision against walls / ledges
-  var steps = Math.max(1, Math.ceil(Math.abs(car.speed) * dt / 0.35));
+  var steps = Math.max(1, Math.ceil(Math.hypot(car.vx, car.vz) * dt / 0.35));
   for (var i = 0; i < steps; i++) {
-    var sd = car.speed * dt / steps, fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
-    var nx = car.pos.x + fx * sd, nz = car.pos.z + fz * sd;
+    var nx = car.pos.x + car.vx * dt / steps, nz = car.pos.z + car.vz * dt / steps;
     var bump = VEH._bumper(car, C, nx, nz, Math.sign(car.speed || 1));
     if (bump > car.pos.y + 1.15 || !C.inBounds(nx, nz)) {
       var hit = Math.abs(car.speed);
-      car.speed = -car.speed * 0.3;
+      car.speed = -car.speed * 0.3; car.vx *= -0.3; car.vz *= -0.3;
       if (hit > 4) { AudioEngine.sfx("metal", Math.min(1, hit / 20)); AudioEngine.sfx("bonk"); if (typeof _screenShake !== "undefined") { _screenShake = Math.min(0.6, hit / 30); _screenShakeT = 0.3; } }
       break;
     }
@@ -262,24 +353,46 @@ VEH.drive = function(car, C, dt) {
   // ground under the wheels
   var g = VEH._wheelHeights(car, C), ground = Math.max(g.fl, g.fr, g.rl, g.rr);
   if (car.pos.y > ground + 0.08 || car.vy > 0) {
-    car.onGround = false; car.vy -= grav * dt; car.pos.y += car.vy * dt;
-    if (car.pos.y <= ground) { if (car.vy < -6) { AudioEngine.sfx("land", Math.min(1, -car.vy / 18)); if (typeof _screenShake !== "undefined") { _screenShake = 0.25; _screenShakeT = 0.25; } } car.pos.y = ground; car.vy = 0; car.onGround = true; }
+    car.onGround = false; car.vy -= grav * dt; car.pos.y += car.vy * dt; car.airT = (car.airT || 0) + dt;
+    if (car.pos.y <= ground) {
+      var imp = -car.vy;
+      if (imp > 6) { AudioEngine.sfx("land", Math.min(1, imp / 18)); if (typeof _screenShake !== "undefined") { _screenShake = 0.25; _screenShakeT = 0.25; } }
+      car.pos.y = ground; car.vy = 0; car.onGround = true;
+      if (cart) {   // boing: the suspension bottoms out and kicks back up
+        car.susV -= Math.min(9, imp) * 0.55;
+        if (imp > 8) { car.vy = imp * 0.28; car.onGround = false; AudioEngine.sfx("boing", 0.6); }
+        if (car.airT > 0.9 && typeof CINE !== "undefined") CINE.callout(car.airT > 1.6 ? "MEGA AIR!" : "BIG AIR!", "gold", car.airT.toFixed(1) + " s");
+      }
+      car.airT = 0;
+    }
   } else {
     // climb small steps smoothly; when a ledge drops away we launch off it with our speed
     var wasY = car.pos.y;
     car.pos.y += (ground - car.pos.y) * Math.min(1, dt * 18);
     car.onGround = true; car.vy = 0;
-    if (ground < wasY - 0.5) { car.onGround = false; car.vy = Math.max(0, (wasY - ground) * 0.5); car.pos.y = wasY; }
+    if (cart && dt > 0) { var sv = (ground - car.gPrev) / dt; car.slopeV += (Math.max(-12, Math.min(14, sv)) - car.slopeV) * Math.min(1, dt * 10); car.susV += (ground - car.gPrev) * 3; }
+    if (ground < wasY - 0.5) {
+      car.onGround = false; car.pos.y = wasY;
+      car.vy = cart ? Math.max(0, car.slopeV) * 1.1 + 1.2 : Math.max(0, (wasY - ground) * 0.5);   // ramps fling the cart
+      if (cart && car.vy > 4) { AudioEngine.sfx("whoosh", 0.7); if (typeof CAMFX !== "undefined") CAMFX.kick(6); }
+    }
   }
+  car.gPrev = ground;
   var tp = Math.atan2(((g.rl + g.rr) - (g.fl + g.fr)) / 2, 2 * VEH.WHEEL_Z), tr = Math.atan2(((g.fr + g.rr) - (g.fl + g.rl)) / 2, 2 * VEH.WHEEL_X);
   if (!car.onGround) { tp = -car.vy * 0.025; tr = 0; }
-  car.pitch += (Math.max(-0.5, Math.min(0.5, tp)) - car.pitch) * Math.min(1, dt * 8);
-  car.roll += (Math.max(-0.4, Math.min(0.4, tr)) + car.steer * car.speed * 0.006 - car.roll) * Math.min(1, dt * 8);
+  if (cart) {   // springy body: overshoots and wobbles back
+    var tpc = Math.max(-0.55, Math.min(0.55, tp)), trc = Math.max(-0.45, Math.min(0.45, tr)) + car.steer * car.speed * 0.012;
+    car.pV += ((tpc - car.pitch) * 70 - car.pV * 7) * dt; car.pitch += car.pV * dt;
+    car.rV += ((trc - car.roll) * 60 - car.rV * 6) * dt; car.roll += car.rV * dt;
+  } else {
+    car.pitch += (Math.max(-0.5, Math.min(0.5, tp)) - car.pitch) * Math.min(1, dt * 8);
+    car.roll += (Math.max(-0.4, Math.min(0.4, tr)) + car.steer * car.speed * 0.006 - car.roll) * Math.min(1, dt * 8);
+  }
   // water / lava / void: fish the car back out to its last safe spot
   var hz = C.hazardAt(car.pos.x, car.pos.z);
   if (car.pos.y < hz.level + 0.1 && ground < hz.level) {
     AudioEngine.sfx("splash"); spawnParticleBurst(car.pos.clone(), new THREE.Color(0x9adcf0), 30);
-    car.pos.copy(car.safe); car.yaw = car.safeYaw; car.speed = 0; car.vy = 0;
+    car.pos.copy(car.safe); car.yaw = car.safeYaw; car.speed = 0; car.vy = 0; car.vx = car.vz = 0;
     _flashPrompt("Splash! The car was towed back");
   } else if (car.onGround && Math.abs(car.speed) < 12) { car.safe.copy(car.pos); car.safeYaw = car.yaw; }
   // crashes into critters / traffic / friends
@@ -436,21 +549,22 @@ VEH.followNet = function(car, dt) {
 };
 
 // ── Engine sound: a pitched, filtered buzz that follows the speed ────────────
-VEH.engineStart = function() {
+VEH.engineStart = function(kind) {
   var A = AudioEngine; if (!A.ctx || !A.G || VEH._eng) return;
   var ctx = A.ctx, o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
-  o1.type = "sawtooth"; o2.type = "square"; o2.detune.value = -1200;
+  var cart = kind === "cart";   // electric whine instead of an engine buzz
+  o1.type = cart ? "triangle" : "sawtooth"; o2.type = cart ? "sine" : "square"; o2.detune.value = cart ? 700 : -1200;
   lp.type = "lowpass"; lp.frequency.value = 600; g.gain.value = 0.0001;
   o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(A.G.sfx);
   o1.start(); o2.start();
   g.gain.setTargetAtTime(0.05, ctx.currentTime, 0.2);
-  VEH._eng = { o1: o1, o2: o2, lp: lp, g: g };
+  VEH._eng = { o1: o1, o2: o2, lp: lp, g: g, cart: cart };
   AudioEngine.sfx("energy", 0.4);
 };
 VEH.engineTick = function(car) {
   var e = VEH._eng; if (!e) return;
   var t = AudioEngine.ctx.currentTime, sp = Math.abs(car.speed), gear = sp % 8 / 8;
-  var f = 45 + sp * 5 + gear * 25;
+  var f = e.cart ? 110 + sp * 14 : 45 + sp * 5 + gear * 25;
   e.o1.frequency.setTargetAtTime(f, t, 0.05); e.o2.frequency.setTargetAtTime(f, t, 0.05);
   e.lp.frequency.setTargetAtTime(500 + sp * 60, t, 0.1);
   e.g.gain.setTargetAtTime(0.035 + Math.min(1, sp / 24) * 0.045, t, 0.1);
@@ -475,8 +589,9 @@ VEH.prompt = function() {
   el.style.display = show ? "" : "none";
   if (!show) return;
   var full = near && near.seats.every(function(o) { return o && o.kind === "player"; });
-  var html = VEH.mySeat ? "<kbd>E</kbd> Get out" : full ? "Car is full" : (near.seats[0] ? "<kbd>E</kbd> Ride along" : "<kbd>E</kbd> Drive the Celica");
-  if (el._h !== html) { el.innerHTML = "🚗 " + html; el._h = html; }
+  var cv = (VEH.mySeat && VEH.mySeat.car) || near, cartK = cv && cv.kind === "cart";
+  var html = VEH.mySeat ? "<kbd>E</kbd> Get out" : full ? (cartK ? "Cart is full" : "Car is full") : (near.seats[0] ? "<kbd>E</kbd> Ride along" : "<kbd>E</kbd> " + (cartK ? "Drive the golf cart" : "Drive the Celica"));
+  if (el._h !== html) { el.innerHTML = (cartK ? "⛳ " : "🚗 ") + html; el._h = html; }
 };
 VEH.hud = function(on) {
   var el = document.getElementById("veh-hud");

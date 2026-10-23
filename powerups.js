@@ -21,6 +21,8 @@ var ITEMS = {
   freeze:  { icon: "❄️", name: "Freeze Bomb",   desc: "Lob it — freezes everyone it lands near",          w: 6,  color: 0xbfeaff, kind: "attack" },
   fire:    { icon: "🔥", name: "Fireball Disc", desc: "Next throw flies 40% further and bowls people over", w: 6, color: 0xff7a1a, kind: "move" },
   laser:   { icon: "🛰️", name: "Orbital Laser", desc: "Calls a strike down on the leader",                w: 2,  color: 0xff3aff, kind: "attack" },
+  sticky:  { icon: "🍯", name: "Sticky Disc",   desc: "Next throw stops dead wherever it touches — no skips, no rolls", w: 6, color: 0xffb03a, kind: "move" },
+  anvil:   { icon: "⚓", name: "Anvil Disc",    desc: "Next throw is heavy: ignores wind, drops early, flattens people", w: 5, color: 0x8a8a9a, kind: "attack" },
 };
 var POWERUPS = ITEMS;   // legacy name
 var PU = { tokens: [], active: {}, inv: [], sel: 0, poops: [], rockets: [], mines: [], bombs: [], lasers: [], batCd: 0, swingT: 0, fireNext: false, fireThrow: false, _seq: 0, MAX: 3 };
@@ -95,7 +97,7 @@ PU.mineMesh = function() {
 // ── Placement (deterministic, so every player sees the same bags) ────────────
 function spawnPowerups(hole, idx) {
   PU.clearWorld();
-  PU.tokens = []; PU.active = {}; PU.inv = []; PU.sel = 0; PU.fireNext = PU.fireThrow = false; PU.attachBat(false);
+  PU.tokens = []; PU.active = {}; PU.inv = []; PU.sel = 0; PU.fireNext = PU.fireThrow = false; PU.modNext = PU.discMod = null; PU.attachBat(false);
   powerupMeshes = [];
   var setting = mpMode && typeof BT !== "undefined" ? BT.items : "normal";
   if (setting === "off" || (!mpMode && idx < 1)) { PU.renderHud(); return; }   // first single-player hole is calm
@@ -117,8 +119,20 @@ function spawnPowerups(hole, idx) {
 }
 PU.clearWorld = function() {
   [PU.poops, PU.rockets, PU.mines, PU.bombs, PU.lasers].forEach(function(arr) { arr.forEach(function(o) { PU._drop(o); }); arr.length = 0; });
+  if (PU._fades) { PU._fades.forEach(function(F) { PU._give(F.m); }); PU._fades.length = 0; }
 };
-PU._drop = function(o) { [o.mesh, o.ring, o.beam, o.trail].forEach(function(m) { if (m && m.parent) m.parent.remove(m); }); };
+PU._drop = function(o) { [o.mesh, o.ring, o.beam, o.trail].forEach(function(m) { if (m && m.parent) m.parent.remove(m); if (m && m.userData.pool) PU._give(m); }); };
+// Object pool for short-lived FX meshes (tracers, shockwaves, laser rings/beams):
+// each kind keeps its own mesh + material and is reset on reuse — no per-shot
+// allocation, no shader/material churn, nothing for the GC to chase mid-match.
+PU._pool = {};
+PU._take = function(kind, make) {
+  var l = PU._pool[kind] || (PU._pool[kind] = []), m = l.pop();
+  if (!m) { m = make(); m.userData.pool = kind; m.userData.noBatch = true; }
+  m.scale.set(1, 1, 1); m.rotation.set(0, 0, 0); m.visible = true; m.material.opacity = m.userData.op0 || m.material.opacity;
+  return m;
+};
+PU._give = function(m) { if (m.parent) m.parent.remove(m); var l = PU._pool[m.userData.pool]; if (l && l.indexOf(m) < 0 && l.length < 24) l.push(m); };
 
 // ── Pickup: run / dive into a bag ────────────────────────────────────────────
 function checkPowerupCollection() {
@@ -143,6 +157,8 @@ PU.takeToken = function(p, mine) {
   PU.sel = PU.inv.length - 1;
   PU.banner(ITEMS[type].icon + " " + ITEMS[type].name + " — " + ITEMS[type].desc);
   AudioEngine.sfx("powerup");
+  if (typeof TIPS !== "undefined") TIPS.show("item", { k: INPUT.glyph("item"), k2: INPUT.glyph("itemNext") }, 2800);
+  if (typeof LOG !== "undefined") LOG.ev("item_get", { type: type });
   PU.renderHud();
 };
 // Catch-up odds: trailing players roll more attack items, the leader more defence
@@ -189,6 +205,7 @@ PU.canAct = function() {
 PU.useItem = function() {
   var it = PU.cur(); if (!it || !PU.canAct()) return;
   var t = it.type, me = PL.pos, d = PU.aimDir();
+  if (typeof LOG !== "undefined") LOG.ev("item_use", { type: t });
   if (it.bat) { PU.swing(); return; }
   switch (t) {
     case "coffee": PU.active.speed = T + 10; PU.banner("☕ Espresso — go go go!"); AudioEngine.sfx("powerup"); break;
@@ -209,6 +226,8 @@ PU.useItem = function() {
     case "magnet": PU.send({ k: "shield", o: myIdx, d: 6 }); break;
     case "freeze": PU.send({ k: "freeze", id: PU.id(), o: myIdx, x: me.x, y: me.y + 1.6, z: me.z, vx: +(d.x * 13).toFixed(2), vy: 7.5, vz: +(d.z * 13).toFixed(2) }); break;
     case "fire": PU.fireNext = true; PU.banner("🔥 Fireball armed — your next throw is on fire!"); AudioEngine.sfx("powerup"); break;
+    case "sticky": PU.modNext = "sticky"; PU.banner("🍯 Sticky disc — it stops wherever it lands"); AudioEngine.sfx("powerup"); break;
+    case "anvil": PU.modNext = "heavy"; PU.banner("⚓ Anvil disc — heavy, wind-proof, bone-crushing"); AudioEngine.sfx("powerup"); break;
     case "laser": PU.send({ k: "laser", id: PU.id(), o: myIdx, tg: PU.laserTarget() }); break;
   }
   PU.consume();
@@ -286,6 +305,7 @@ PU.swing = function() {
     var dx = o.x - PL.pos.x, dz = o.z - PL.pos.z, d = Math.hypot(dx, dz);
     if (d < 2.6 + (o.r || 0) && (dx * fx + dz * fz) / (d || 1) > -0.2) { ENT.launch(o, dx / (d || 1) * 13, 11, dz / (d || 1) * 13); hit = true; }
   });
+  if (typeof GAD !== "undefined" && GAD.hitNear(PL.pos.x, PL.pos.z, fx, fz, 2.8)) hit = true;
   if (hit) { AudioEngine.sfx("bonk"); _screenShake = 0.3; _screenShakeT = 0.3; }
 };
 // Legacy message from older clients
@@ -315,7 +335,7 @@ PU.onNet = function(m) {
   var mine = m.o === myIdx;
   switch (m.k) {
     case "horn": {
-      AudioEngine.sfx("honk"); PU.shockwave(m.x, m.y, m.z, 18, 0xffd23a);
+      AudioEngine.sfx("honk", 0.8, mine ? null : new THREE.Vector3(m.x, m.y, m.z)); PU.shockwave(m.x, m.y, m.z, 18, 0xffd23a);
       if (!mine) {
         var d = Math.hypot(PL.pos.x - m.x, PL.pos.z - m.z);
         if (d < 18) PU.horned(m.o);
@@ -353,7 +373,7 @@ PU.onNet = function(m) {
       break;
     }
     case "laser": {
-      var ring = new THREE.Mesh(new THREE.RingGeometry(4.2, 4.5, 48), new THREE.MeshBasicMaterial({ color: 0xff2a6a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+      var ring = PU._take("lring", function() { return new THREE.Mesh(PU._get("lrGeo", function() { return new THREE.RingGeometry(4.2, 4.5, 48); }), new THREE.MeshBasicMaterial({ color: 0xff2a6a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })); });
       ring.rotation.x = -Math.PI / 2; scene.add(ring);
       PU.lasers.push({ id: m.id, o: m.o, tg: m.tg, t: 0, ring: ring, lock: null, pos: new THREE.Vector3(basketBase.x, basketBase.y, basketBase.z) });
       AudioEngine.sfx("energy");
@@ -396,13 +416,14 @@ PU.boom = function(id, x, y, z) {
 };
 PU.tracer = function(x, y, z, x2, y2, z2) {
   var a = new THREE.Vector3(x, y, z), b = new THREE.Vector3(x2, y2, z2), len = a.distanceTo(b);
-  var m = new THREE.Mesh(PU._get("trGeo", function() { var g = new THREE.CylinderGeometry(0.03, 0.03, 1, 6); g.rotateX(Math.PI / 2); g.translate(0, 0, 0.5); return g; }), new THREE.MeshBasicMaterial({ color: 0x9aff6a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+  var m = PU._take("tr", function() { var mm = new THREE.Mesh(PU._get("trGeo", function() { var g = new THREE.CylinderGeometry(0.03, 0.03, 1, 6); g.rotateX(Math.PI / 2); g.translate(0, 0, 0.5); return g; }), new THREE.MeshBasicMaterial({ color: 0x9aff6a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })); mm.userData.op0 = 0.9; return mm; });
   m.position.copy(a); m.lookAt(b); m.scale.set(1, 1, len); scene.add(m);
   spawnParticleBurst(b, new THREE.Color(0x9aff6a), 8);
   var t0 = T; PU._fades = PU._fades || []; PU._fades.push({ m: m, t0: t0, dur: 0.35 });
 };
 PU.shockwave = function(x, y, z, r, color) {
-  var m = new THREE.Mesh(PU._get("swGeo", function() { return new THREE.RingGeometry(0.85, 1, 48); }), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  var m = PU._take("sw", function() { var mm = new THREE.Mesh(PU._get("swGeo", function() { return new THREE.RingGeometry(0.85, 1, 48); }), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })); mm.userData.op0 = 0.8; return mm; });
+  m.material.color.set(color);
   m.rotation.x = -Math.PI / 2; m.position.set(x, y + 0.3, z); scene.add(m);
   PU._fades = PU._fades || []; PU._fades.push({ m: m, t0: T, dur: 0.6, grow: r });
 };
@@ -476,7 +497,7 @@ PU.update = function(dt) {
   PU._fire(dt);
   if (PU._fades) for (var f = PU._fades.length - 1; f >= 0; f--) {
     var F = PU._fades[f], q = (T - F.t0) / F.dur;
-    if (q >= 1) { scene.remove(F.m); F.m.material.dispose(); PU._fades.splice(f, 1); continue; }
+    if (q >= 1) { PU._give(F.m); PU._fades.splice(f, 1); continue; }
     F.m.material.opacity = (1 - q) * 0.85;
     if (F.grow) F.m.scale.setScalar(1 + q * F.grow);
   }
@@ -551,7 +572,7 @@ PU._lasers = function(dt, C) {
     L.ring.material.opacity = 0.45 + 0.45 * Math.abs(Math.sin(L.t * (L.lock ? 18 : 7)));
     if (L.lock && !L.struck && L.t > (L.lockT || (L.lockT = L.t + 0.9))) {
       L.struck = true;
-      var beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 120, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xff4a9a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      var beam = PU._take("lbeam", function() { var mm = new THREE.Mesh(PU._get("lbGeo", function() { return new THREE.CylinderGeometry(2.2, 2.2, 120, 24, 1, true); }), new THREE.MeshBasicMaterial({ color: 0xff4a9a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })); mm.userData.op0 = 0.85; return mm; });
       beam.position.set(at.x, L.ring.position.y + 60, at.z); scene.add(beam); L.beam = beam; L.beamT = T;
       spawnExplosion(new THREE.Vector3(at.x, L.ring.position.y + 0.5, at.z));
       _screenShake = 0.8; _screenShakeT = 0.7; AudioEngine.sfx("energy");
@@ -578,6 +599,7 @@ PU.renderHud = function() {
   if (PU.active.speed > T) { var left = PU.active.speed - T; h += "<div class='pu-chip glass'><span>⚡</span><b>" + Math.ceil(left) + "s</b><i style='width:" + Math.min(100, left / 10 * 100) + "%;background:#ffd23a'></i></div>"; }
   if (typeof BT !== "undefined" && BT.shieldT > 0) h += "<div class='pu-chip glass'><span>🧲</span><b>" + Math.ceil(BT.shieldT) + "s</b><i style='width:" + (BT.shieldT / 6 * 100) + "%;background:#6ad8ff'></i></div>";
   if (PU.fireNext) h += "<div class='pu-chip glass'><span>🔥</span><b>armed</b></div>";
+  if (PU.modNext) h += "<div class='pu-chip glass'><span>" + (PU.modNext === "sticky" ? "🍯" : "⚓") + "</span><b>armed</b></div>";
   var slots = "";
   for (var i = 0; i < PU.MAX; i++) {
     var it = PU.inv[i];
@@ -586,7 +608,7 @@ PU.renderHud = function() {
     slots += "<button class='pu-slot" + (i === PU.sel ? " sel" : "") + "' onclick='PU.select(" + i + ");PU.useItem()' title='" + I.name + " — " + I.desc + "'><span>" + I.icon + "</span>" + (extra ? "<em>" + extra + "</em>" : "") + "</button>";
   }
   var cur = PU.cur();
-  h += "<div class='pu-bag glass'><div class='pu-slots'>" + slots + "</div>" + (cur ? "<div class='pu-name'><b>" + ITEMS[cur.type].name + "</b><kbd>F</kbd>" + (PU.inv.length > 1 ? "<kbd>G</kbd>" : "") + "</div>" : "<div class='pu-name dim'>Grab a <b style='color:#c890ff'>?</b> bag</div>") + "</div>";
+  h += "<div class='pu-bag glass'><div class='pu-slots'>" + slots + "</div>" + (cur ? "<div class='pu-name'><b>" + ITEMS[cur.type].name + "</b><kbd>" + (typeof INPUT !== "undefined" ? INPUT.glyph("item") : "F") + "</kbd>" + (PU.inv.length > 1 ? "<kbd>" + (typeof INPUT !== "undefined" ? INPUT.glyph("itemNext") : "G") + "</kbd>" : "") + "</div>" : "<div class='pu-name dim'>Grab a <b style='color:#c890ff'>?</b> bag</div>") + "</div>";
   if (h !== PU._lastHud) { el.innerHTML = h; PU._lastHud = h; }
 };
 window.addEventListener("keydown", function(e) {

@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="lib/meshopt_decoder.js?v=26102803"></script>
   <script>
   (function() {
     var _gltfDone = false, _skelDone = false;
@@ -267,6 +268,7 @@ body.aiming #instr{display:none;}
 #msg{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%) scale(.94);text-align:center;opacity:0;
   transition:opacity .35s,transform .35s cubic-bezier(.2,1.4,.4,1);pointer-events:none;z-index:20;width:min(92vw,560px);}
 #msg.on{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:all;}
+#msg:not(.on),#msg:not(.on) *{pointer-events:none!important;}
 #msg-big{font-size:64px;font-weight:900;line-height:1;letter-spacing:-.01em;color:#fff;
   text-shadow:0 4px 26px rgba(0,40,70,.45),0 2px 0 rgba(0,40,70,.22);}
 #msg-sub{display:inline-block;margin-top:12px;padding:9px 18px;font-size:15px;font-weight:700;border-radius:999px;}
@@ -483,6 +485,61 @@ body.driving #walk-hud .wh-keys{display:none;}
 .pu-name{display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;padding:0 3px;}
 .pu-name.dim{opacity:.8;font-weight:600;}
 .pu-name kbd{font-family:inherit;font-size:10px;padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.25);}
+
+/* ── Settings ── */
+.settings{max-width:560px;}
+.settings .tabs{display:flex;gap:6px;margin:4px 0 12px;flex-wrap:wrap;}
+.settings .tabs button,.seg button{padding:7px 12px;border-radius:999px;border:1.5px solid rgba(255,255,255,.28);background:rgba(255,255,255,.08);color:inherit;font:inherit;font-weight:700;font-size:13px;cursor:pointer;}
+.settings .tabs button.on,.settings .seg button.on{background:rgba(255,225,74,.25);border-color:#ffe14a;}
+.settings .seg{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+.settings .seg.col{flex-direction:column;}
+.s-body{max-height:62vh;overflow:auto;padding-right:4px;}
+.s-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid rgba(255,255,255,.1);font-size:14px;}
+.s-row input[type=range]{width:46%;}
+.rebind{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 10px;}
+.rebind .rb{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;border:1.5px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:inherit;font:inherit;font-size:13px;cursor:pointer;text-align:left;}
+.rebind .rb span{flex:1;}
+.rebind .rb.busy{border-color:#ffe14a;animation:puPulse 1s infinite;}
+.rebind kbd{font-family:inherit;font-weight:800;padding:2px 8px;border-radius:7px;background:rgba(255,255,255,.2);}
+.rebind em{font-style:normal;opacity:.6;font-size:11px;}
+.cb-swatch{display:flex;gap:6px;margin:-2px 0 10px;}.cb-swatch i{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.6);}
+.diag{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;}
+.diag div{display:flex;flex-direction:column;align-items:center;padding:8px;border-radius:12px;background:rgba(255,255,255,.08);}
+.diag b{font-size:20px;}.diag span{font-size:11px;opacity:.75;}
+.errlist{font-size:12px;max-height:150px;overflow:auto;margin-bottom:10px;}
+.errlist div{display:flex;flex-direction:column;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.08);}
+.errlist code{white-space:pre-wrap;word-break:break-all;}.errlist span{opacity:.6;}
+.dim{opacity:.6;font-weight:600;}
+/* ── UI scale & accessibility ── */
+#ui{zoom:var(--ui-scale,1);}
+body.cb .accent,body.cb #pwr-fill{filter:hue-rotate(0deg);}
+/* ── Tips ── */
+.tip-card{position:fixed;left:50%;top:calc(110px + var(--safe-t));transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:min(520px,90vw);padding:10px 12px 10px 14px;border-radius:16px;color:#fff;font-size:14px;z-index:45;animation:tipIn .35s ease-out;transition:opacity .3s,transform .3s;}
+.tip-card.out{opacity:0;transform:translate(-50%,-10px);}
+.tip-card .tip-i{font-size:20px;}
+.tip-card button{border:none;border-radius:50%;width:28px;height:28px;background:rgba(255,255,255,.22);color:#fff;font-weight:900;cursor:pointer;flex:none;}
+@keyframes tipIn{from{opacity:0;transform:translate(-50%,-14px)}}
+/* ── Out of bounds ── */
+#oob-warn{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);padding:12px 22px;border-radius:999px;background:rgba(255,60,60,.75);color:#fff;font-size:20px;font-weight:900;display:none;pointer-events:none;animation:btCrit .5s ease-in-out infinite alternate;}
+/* ── Emote wheel ── */
+#emote-wheel{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:50;background:radial-gradient(circle,rgba(0,0,0,.25),rgba(0,0,0,.05) 60%);}
+.ew-ring{position:relative;width:320px;height:320px;border-radius:50%;background:rgba(15,20,40,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:2px solid rgba(255,255,255,.2);}
+.ew-slot{position:absolute;transform:translate(-50%,-50%);width:78px;height:78px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;background:rgba(255,255,255,.1);cursor:pointer;transition:transform .12s,background .12s;}
+.ew-slot span{font-size:30px;line-height:1;}.ew-slot b{font-size:11px;margin-top:3px;}
+.ew-slot.on{background:rgba(255,225,74,.35);transform:translate(-50%,-50%) scale(1.15);}
+.ew-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-weight:800;opacity:.75;}
+/* ── Progression ── */
+#lvl-badge{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-radius:14px;background:rgba(255,255,255,.12);margin-bottom:8px;font-size:12px;}
+#lvl-badge .lv{font-weight:900;font-size:14px;}
+#lvl-badge .bar{flex:1;min-width:80px;height:7px;border-radius:999px;background:rgba(0,0,0,.2);overflow:hidden;}
+#lvl-badge .bar i{display:block;height:100%;background:linear-gradient(90deg,#ffd23a,#ff8a3a);}
+#lvl-badge .xp{opacity:.8;font-weight:700;}
+.xp-pop{position:absolute;left:50%;top:30%;transform:translateX(-50%);padding:6px 16px;border-radius:999px;background:rgba(40,30,90,.7);color:#ffe14a;font-weight:900;font-size:16px;pointer-events:none;animation:btPop 2.4s ease-out forwards;white-space:nowrap;}
+.pf-celeb{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+/* gamepad hint glyphs read a little bigger */
+body.pad kbd{font-size:1.05em;}
+.lb-p .rdy{margin-left:auto;font-style:normal;font-size:11px;font-weight:800;opacity:.55;}
+.lb-p .rdy.on{opacity:1;color:#8affc0;}
 /* ── Battle HUD ── */
 #bt-clock{position:absolute;left:50%;top:calc(84px + var(--safe-t));transform:translateX(-50%);display:none;align-items:baseline;gap:8px;padding:5px 16px;border-radius:999px;color:#fff;pointer-events:none;}
 #bt-clock span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.85;}
@@ -579,6 +636,145 @@ body.bt-done #relief-btn{display:none;}
   #dist{bottom:calc(140px + var(--safe-b));}
 }
   </style>
+  <style id="arcade-css">
+/* ═══════════════════════════════════════════════════════════════════
+   ARCADE JUICE — cinematic bars, callouts, ability prompt, tactile UI
+   ═══════════════════════════════════════════════════════════════════ */
+#cine-bars{position:fixed;inset:0;pointer-events:none;z-index:5;--k:0;}
+#cine-bars i{position:absolute;left:0;right:0;height:10.5vh;background:linear-gradient(#04060b,#0b0f18);}
+#cine-bars .t{top:0;transform:translateY(calc((var(--k) - 1) * 100%));}
+#cine-bars .b{bottom:0;transform:translateY(calc((1 - var(--k)) * 100%));}
+.callout{position:absolute;left:50%;top:27%;transform:translate(-50%,-50%) rotate(var(--rot,0deg));text-align:center;pointer-events:none;z-index:30;
+  animation:coPop 1.9s cubic-bezier(.2,1.6,.4,1) forwards;white-space:nowrap;}
+.callout b{display:block;font-size:76px;font-weight:900;line-height:1;letter-spacing:.01em;font-style:italic;
+  background:linear-gradient(180deg,#fff 0%,#fff 38%,#bfefff 62%,#62cff6 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  -webkit-text-stroke:3px #10324a;paint-order:stroke fill;filter:drop-shadow(0 6px 0 rgba(10,30,50,.45)) drop-shadow(0 12px 22px rgba(0,0,0,.25));}
+.callout span{display:inline-block;margin-top:6px;padding:4px 14px;border-radius:999px;background:rgba(16,50,74,.72);color:#fff;font-weight:800;font-size:16px;}
+.callout.gold b{background:linear-gradient(180deg,#fffbe0 0%,#ffe680 40%,#ffb72e 70%,#ff8a1a 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke-color:#5a2a00;}
+.callout.hot b{background:linear-gradient(180deg,#fff3e0 0%,#ffb36b 40%,#ff5a3a 75%,#d81e5b 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke-color:#4a0a1a;}
+.callout.miss b{background:linear-gradient(180deg,#fff 0%,#e8e0ff 45%,#a58aff 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke-color:#2a1a5a;}
+.callout.boom b{font-size:92px;background:linear-gradient(180deg,#fff7b0 0%,#ffd23a 35%,#ff6a1a 70%,#c81e1e 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke-color:#3a0a00;}
+@keyframes coPop{0%{opacity:0;transform:translate(-50%,-50%) rotate(var(--rot)) scale(.2)}
+  12%{opacity:1;transform:translate(-50%,-50%) rotate(var(--rot)) scale(1.18)}
+  22%{transform:translate(-50%,-50%) rotate(calc(var(--rot) * -1)) scale(.94)}
+  32%{transform:translate(-50%,-50%) rotate(var(--rot)) scale(1.03)}
+  78%{opacity:1;transform:translate(-50%,-56%) rotate(var(--rot)) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-80%) rotate(var(--rot)) scale(.9)}}
+body.reduce-motion .callout{animation-duration:1.4s;}
+/* arcade discs in the dock: a hot ring + their trick icon */
+#disc-pick{max-width:min(66vw,660px);}
+.dopt.arc{background:linear-gradient(180deg,rgba(255,200,80,.12),rgba(255,90,60,.08));}
+.dopt.arc .orb{box-shadow:0 0 0 2px rgba(255,210,90,.75),0 0 14px rgba(255,140,40,.55);}
+.dopt.arc .dab{position:absolute;top:1px;left:3px;font-size:13px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4));}
+.dopt.arc.on{box-shadow:inset 0 0 0 2px rgba(255,210,90,.9);}
+/* the mid-flight trick prompt (a big tap target on touch screens) */
+#ars-hud{position:absolute;left:50%;bottom:calc(150px + var(--safe-b));transform:translateX(-50%) scale(.6);opacity:0;pointer-events:none;
+  display:flex;align-items:center;gap:10px;padding:10px 22px 10px 12px;border-radius:999px;border:2px solid rgba(255,230,140,.9);cursor:pointer;
+  background:linear-gradient(180deg,#ffb23a,#ff5a2a);color:#fff;font:inherit;font-weight:900;font-size:22px;letter-spacing:.03em;
+  box-shadow:0 10px 30px rgba(255,90,30,.45),inset 0 2px 0 rgba(255,255,255,.5);text-shadow:0 2px 0 rgba(120,30,0,.45);
+  transition:transform .18s cubic-bezier(.3,1.8,.5,1),opacity .15s;}
+#ars-hud.on{opacity:1;transform:translateX(-50%) scale(1);pointer-events:all;}
+#ars-hud.ready{animation:arsPulse .55s ease-in-out infinite alternate;}
+#ars-hud.used{transform:translateX(-50%) scale(1.25);opacity:0;transition:transform .5s cubic-bezier(.2,1.5,.4,1),opacity .6s .15s;}
+#ars-hud.passive{background:linear-gradient(180deg,#7aee5a,#2fb84a);border-color:rgba(220,255,200,.9);box-shadow:0 10px 30px rgba(40,180,60,.4),inset 0 2px 0 rgba(255,255,255,.5);pointer-events:none;}
+#ars-hud kbd{font:inherit;font-size:13px;padding:5px 10px;border-radius:10px;background:rgba(80,20,0,.35);border:1px solid rgba(255,255,255,.45);}
+#ars-hud .ic{font-size:26px;}
+#ars-hud em{font-style:normal;font-size:13px;font-weight:800;opacity:.9;}
+.ew-slot.dance{background:rgba(255,200,80,.2);box-shadow:inset 0 0 0 2px rgba(255,210,90,.55);}
+.chip.locked{opacity:.55;cursor:default;} .chip.locked small{font-size:10px;margin-left:4px;opacity:.8;}
+/* reaction cam inset (the 3D view itself is drawn by CINE.pipRender into this rectangle) */
+#pip{position:fixed;z-index:12;pointer-events:none;border-radius:5px;box-shadow:0 0 0 3px #fff,0 10px 30px rgba(0,0,0,.35);opacity:0;transform:scale(.6) rotate(4deg);
+  transition:opacity .2s,transform .35s cubic-bezier(.3,1.7,.5,1);}
+#pip.on{opacity:1;transform:none;}
+#pip b{position:absolute;left:10px;bottom:-14px;padding:4px 12px;border-radius:999px;background:#ff5a3a;color:#fff;font-weight:900;font-size:15px;letter-spacing:.02em;box-shadow:0 3px 8px rgba(0,0,0,.3);transform:rotate(-3deg);}
+#pip i{position:absolute;right:10px;top:8px;font-style:normal;font-size:11px;font-weight:900;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6);animation:pipRec 1s steps(2) infinite;}
+@keyframes pipRec{50%{opacity:.25}}
+/* ── the menu is a clipboard (scorecard paper on a wooden board, held up by your golfer) ── */
+.menu-card.sheet{border:13px solid transparent;border-radius:24px;padding:30px 24px 18px;
+  background:repeating-linear-gradient(180deg,transparent 0 31px,rgba(90,150,210,.10) 31px 32px) padding-box,
+    linear-gradient(90deg,transparent 0 30px,rgba(255,90,90,.18) 30px 31.5px,transparent 31.5px) padding-box,
+    linear-gradient(180deg,#fffdf6,#fff7e6) padding-box,
+    repeating-linear-gradient(97deg,#c08a52 0 7px,#b07a44 7px 12px,#c9955e 12px 21px,#a8723e 21px 24px) border-box;
+  box-shadow:0 2px 0 #8a5a2e,0 28px 60px rgba(30,18,8,.38),inset 0 0 0 1px rgba(140,100,60,.25);
+  -webkit-backdrop-filter:none;backdrop-filter:none;rotate:-1.2deg;
+  animation:sheetIn .55s cubic-bezier(.2,1.45,.4,1) both,boardSway 7s ease-in-out .6s infinite;}
+.menu-card.sheet::before{content:"";position:absolute;top:-30px;left:50%;width:150px;height:42px;margin-left:-75px;z-index:3;border-radius:12px 12px 16px 16px;
+  background:linear-gradient(180deg,#fafcff,#b8c0cc 48%,#e6eaf0 52%,#9aa2ae);box-shadow:0 5px 9px rgba(0,0,0,.28),inset 0 2px 0 #fff,inset 0 -2px 0 rgba(0,0,0,.15);}
+.menu-card.sheet::after{content:"";position:absolute;top:-16px;left:50%;width:20px;height:20px;margin-left:-10px;z-index:4;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#fff,#9aa2ae 60%,#6a727e);box-shadow:0 1px 2px rgba(0,0,0,.35);}
+@keyframes boardSway{0%,100%{rotate:-1.2deg;translate:0 0}50%{rotate:.4deg;translate:0 -4px}}
+@media (min-width:900px) and (min-aspect-ratio:23/20){
+  #menu{justify-content:flex-end;}
+  #menu .menu-card{margin:auto 8vw auto auto;}
+}
+body.reduce-motion .menu-card.sheet{animation:sheetIn .55s both;}
+@media (max-width:640px){ .menu-card.sheet{border-width:9px;padding:28px 14px 14px;} }
+@keyframes arsPulse{from{transform:translateX(-50%) scale(1)}to{transform:translateX(-50%) scale(1.08)}}
+/* ── tactile controls: spring on hover / press / release (scale + rotate are separate from transform) ── */
+:is(.btn,.chip,.tile,.dopt,.icon-btn,.dock-btn,.seg button,.back,.x,.pf-card,.menu-disc-card,.gv-btn,.rb,#ars-hud){
+  transition:transform .12s,box-shadow .15s,filter .12s,background .15s,color .15s,opacity .15s,scale .34s cubic-bezier(.3,1.9,.45,1),rotate .34s cubic-bezier(.3,1.9,.45,1);}
+:is(.btn,.tile,.pf-card,.menu-disc-card):hover{scale:1.045;rotate:-1deg;}
+:is(.chip,.seg button,.gv-btn,.rb):hover{scale:1.07;}
+:is(.icon-btn,.dock-btn,.back,.x):hover{scale:1.12;rotate:-4deg;}
+.dopt:hover{scale:1.12;}
+:is(.btn,.chip,.tile,.dopt,.icon-btn,.dock-btn,.seg button,.back,.x,.pf-card,.menu-disc-card,.gv-btn,.rb):active{scale:.88;rotate:0deg;transition-duration:.06s;}
+.jpop{animation:jPop .42s cubic-bezier(.3,1.6,.5,1);}
+@keyframes jPop{0%{scale:.86}35%{scale:1.13}60%{scale:.96}100%{scale:1}}
+.jbit{position:fixed;width:8px;height:8px;border-radius:2px;pointer-events:none;z-index:9999;animation:jBit .75s cubic-bezier(.2,.7,.4,1) forwards;}
+@keyframes jBit{to{transform:translate(var(--dx),var(--dy)) rotate(var(--r)) scale(.3);opacity:0}}
+.npop{animation:nPop .45s cubic-bezier(.3,1.8,.5,1);display:inline-block;}
+@keyframes nPop{0%{scale:1}30%{scale:1.45;color:#ffe680}100%{scale:1}}
+/* menu: springy card, bouncing logo, wavy title */
+.menu-card,.modal > .sheet,#final-card > .sheet{animation:sheetIn .55s cubic-bezier(.2,1.45,.4,1) both;}
+@keyframes sheetIn{0%{opacity:0;transform:translateY(40px) scale(.86)}60%{opacity:1}100%{transform:none}}
+.logo{animation:logoBob 2.6s ease-in-out infinite;}
+.logo:hover{animation:logoSpin .8s cubic-bezier(.3,1.5,.5,1);}
+@keyframes logoBob{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-7px) rotate(8deg)}}
+@keyframes logoSpin{0%{transform:rotate(0) scale(1)}50%{transform:rotate(200deg) scale(1.25)}100%{transform:rotate(360deg) scale(1)}}
+.brand h1 span{display:inline-block;animation:letterWave 3.2s ease-in-out infinite;animation-delay:calc(var(--i) * .08s);
+  background:linear-gradient(180deg,#1e8fcf,#11507e);-webkit-background-clip:text;background-clip:text;color:transparent;}   /* each letter carries the gradient (inline-blocks break the parent's clip) */
+@keyframes letterWave{0%,72%,100%{transform:translateY(0) rotate(0)}80%{transform:translateY(-9px) rotate(-6deg)}88%{transform:translateY(2px) rotate(3deg)}}
+/* power bar running hot */
+body.charge-hot #pwr-bar{animation:pwrShake .07s linear infinite;}
+body.charge-hot #pwr-fill{filter:saturate(1.6) brightness(1.15);}
+@keyframes pwrShake{0%{translate:0 0}25%{translate:1.5px -1px}50%{translate:-1px 1px}75%{translate:1px 1.5px}100%{translate:0 0}}
+body.reduce-motion .brand h1 span,body.reduce-motion .logo,body.charge-hot.reduce-motion #pwr-bar{animation:none;}
+/* ── podium: the board beside the victory stage ── */
+#podium-ui{position:fixed;top:0;right:0;bottom:0;width:min(440px,46vw);z-index:120;display:flex;align-items:center;padding:20px 20px 20px 0;pointer-events:none;}
+#podium-ui .sheet{width:100%;max-height:calc(100vh - 40px);overflow-y:auto;padding:22px 20px 18px;pointer-events:all;animation:podIn .6s cubic-bezier(.2,1.4,.4,1) both;}
+@keyframes podIn{0%{opacity:0;transform:translateX(60px) rotate(3deg)}100%{opacity:1;transform:none}}
+.pod-title{font-size:30px;font-weight:900;line-height:1.05;text-align:center;letter-spacing:-.01em;}
+.pod-sub{text-align:center;color:var(--ink2);font-weight:700;font-size:13px;margin:4px 0 12px;}
+.pod-rows{display:flex;flex-direction:column;gap:6px;margin:10px 0 12px;}
+.pod-row{display:grid;grid-template-columns:38px 10px 1fr auto auto;align-items:center;gap:8px;padding:9px 12px;border-radius:16px;background:rgba(255,255,255,.7);
+  box-shadow:0 2px 8px rgba(20,70,100,.1);animation:rowIn .5s cubic-bezier(.2,1.6,.4,1) both;}
+.pod-row:first-child{background:linear-gradient(90deg,#fff6c8,#fffdf0);box-shadow:0 4px 16px rgba(220,160,20,.25);}
+.pod-row.me{outline:2px solid var(--aqua);}
+.pod-row .rk{font-size:24px;text-align:center;font-weight:900;color:var(--ink2);}
+.pod-row i{width:10px;height:10px;border-radius:50%;background:var(--c);}
+.pod-row b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pod-row em{font-style:normal;font-size:12px;color:var(--ink3);font-weight:700;}
+.pod-row .sc{font-size:20px;font-weight:900;min-width:56px;text-align:right;}
+@keyframes rowIn{0%{opacity:0;transform:translateX(40px) scale(.9)}100%{opacity:1;transform:none}}
+.pod-emotes{display:flex;justify-content:center;gap:6px;margin:12px 0 4px;flex-wrap:wrap;}
+.pod-emotes .chip{height:40px;min-width:46px;font-size:20px;justify-content:center;}
+.pod-best{margin:12px 0;padding:10px 12px;border-radius:16px;background:rgba(18,70,104,.05);}
+.pod-best .k{margin-bottom:6px;}
+.pb-row{display:grid;grid-template-columns:34px 56px 1fr;gap:6px;align-items:center;font-size:13px;padding:3px 4px;border-radius:8px;}
+.pb-row b{font-size:16px;font-weight:900;} .pb-row em{font-style:normal;color:var(--ink3);font-weight:700;}
+.pb-row.now{background:rgba(51,195,239,.18);}
+#podium-ui .fc-total{font-size:48px;}
+.pod-tag{position:fixed;transform:translate(-50%,-100%);pointer-events:none;z-index:110;text-align:center;white-space:nowrap;filter:drop-shadow(0 3px 6px rgba(0,0,0,.3));}
+.pod-tag b{display:block;padding:3px 10px;border-radius:999px;background:#fff;color:#123247;font-size:13px;font-weight:900;box-shadow:inset 0 -3px 0 var(--c);}
+.pod-tag span{display:inline-block;margin-top:3px;padding:2px 9px;border-radius:999px;background:var(--c);color:#fff;font-weight:900;font-size:15px;text-shadow:0 1px 2px rgba(0,0,0,.35);}
+.pod-tag.me b{outline:2px solid #ffd23a;}
+@media (max-width:760px){
+  #podium-ui{top:auto;left:0;width:auto;height:58vh;padding:0 10px calc(10px + var(--safe-b));align-items:flex-end;}
+  #podium-ui .sheet{max-height:58vh;}
+  .pod-title{font-size:24px;}
+}
+@media (max-width:640px){ .callout b{font-size:50px;} .callout.boom b{font-size:60px;} }
+  </style>
 </head>
 <body>
   <!-- Icon set -->
@@ -603,20 +799,20 @@ body.bt-done #relief-btn{display:none;}
       <div class="brand">
         <div class="logo"></div>
         <h1>DiskGolfi</h1>
-        <p>Island disc golf · throw, relax, repeat</p>
+        <p>Chaotic disc golf · throw, bonk, repeat</p>
       </div>
 
       <!-- Home -->
       <div id="sp-main-btns" class="view">
-        <label class="field"><span class="k">Your name</span>
+        <label class="field"><span class="k" data-i18n="your_name">Your name</span>
           <input id="username-input" class="input" value="Player 1" maxlength="16" autocomplete="off"
             oninput="if(typeof playerNames!=='undefined')playerNames[0]=this.value||'Player 1'">
         </label>
-        <button class="btn primary big block" onclick="toggleSpMapPicker()">Play</button>
-        <button class="btn block" onclick="_showMpPanel()">Multiplayer</button>
+        <button class="btn primary big block" onclick="toggleSpMapPicker()" data-i18n="play">Play</button>
+        <button class="btn block" onclick="_showMpPanel()" data-i18n="multiplayer">Multiplayer</button>
         <div class="row">
-          <button class="btn ghost" onclick="openProfile('character')">Profile</button>
-          <button class="btn ghost" onclick="openProfile('cases')">Cases<span class="menu-badge" data-case-badge></span></button>
+          <button class="btn ghost" onclick="openProfile('character')"><span data-i18n="profile">Profile</span></button>
+          <button class="btn ghost" onclick="openProfile('cases')"><span data-i18n="cases">Cases</span><span class="menu-badge" data-case-badge></span></button>
         </div>
         <div class="menu-foot">
           <label>Graphics
@@ -624,18 +820,18 @@ body.bt-done #relief-btn{display:none;}
               <option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
             </select>
           </label>
-          <span><button class="link" onclick="toggleSound()">Sound</button> · <button class="link" onclick="toggleHelp()">How to play</button></span>
+          <span><button class="link" onclick="SET.open()" data-i18n="settings">Settings</button> · <button class="link" onclick="toggleSound()" data-i18n="sound">Sound</button> · <button class="link" onclick="toggleHelp()" data-i18n="howto">How to play</button></span>
         </div>
       </div>
 
       <!-- New round -->
       <div id="sp-map-picker" class="view" style="display:none">
-        <div class="view-head"><button class="back" onclick="toggleSpMapPicker()" aria-label="Back">‹</button><h2>New round</h2></div>
-        <div class="sec-label">Holes</div>
+        <div class="view-head"><button class="back" onclick="toggleSpMapPicker()" aria-label="Back">‹</button><h2 data-i18n="new_round">New round</h2></div>
+        <div class="sec-label" data-i18n="holes">Holes</div>
         <div class="seg" id="seg-holes">
           <button data-v="3">3</button><button data-v="9">9</button><button data-v="18">18</button><button data-v="27">27</button><button data-v="36">36</button>
         </div>
-        <div class="sec-label">Difficulty</div>
+        <div class="sec-label" data-i18n="difficulty">Difficulty</div>
         <div class="seg" id="seg-diff">
           <button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button><button data-v="chaos">Chaos</button>
         </div>
@@ -693,6 +889,8 @@ body.bt-done #relief-btn{display:none;}
             <input id="mp-input" class="input" placeholder="e.g. DGX7Q2" maxlength="10" autocomplete="off" style="text-transform:uppercase;letter-spacing:.12em;text-align:center">
           </label>
           <button class="btn primary big block" onclick="joinGame()">Join game</button>
+          <button class="btn block" onclick="QP.quickPlay()">⚡ <span data-i18n="quick_play">Quick play</span></button>
+          <div id="qp-list"></div>
           <div id="join-status" class="status"></div>
         </div>
       </div>
@@ -748,7 +946,7 @@ body.bt-done #relief-btn{display:none;}
 
     <!-- Walking to the disc -->
     <div id="walk-hud">
-      <div class="wh-chip glass"><span class="wh-dot"></span><span class="wh-txt">Walk to your disc</span><b id="walk-dist">—</b><span class="wh-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>V</kbd> dive</span></div>
+      <div class="wh-chip glass"><span class="wh-dot"></span><span class="wh-txt" data-i18n="walk_to_disc">Walk to your disc</span><b id="walk-dist">—</b><span class="wh-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>V</kbd> dive</span></div>
       <button id="relief-btn" class="glass" onclick="takeRelief()" title="Can't reach it? Take a penalty stroke and replay from your last lie">Take relief <span>+1</span></button>
     </div>
     <div id="walk-pad"><div id="walk-knob"></div></div>
@@ -802,15 +1000,18 @@ body.bt-done #relief-btn{display:none;}
       <tr><td><kbd>Q</kbd> <kbd>E</kbd></td><td>Release angle — hyzer curves left, anhyzer curves right</td></tr>
       <tr><td>Loft</td><td>Low, normal or high launch</td></tr>
       <tr><td><kbd>1</kbd>–<kbd>8</kbd></td><td>Choose a disc: putters near the basket, drivers for distance</td></tr>
+      <tr><td><kbd>9</kbd> <kbd>0</kbd> <kbd>-</kbd> <kbd>=</kbd></td><td><b>Trick discs</b> — press <kbd>Space</kbd> (or tap) mid-flight: 🚀 Rocket <i>boosts</i>, ⚒️ Anvil <i>slams</i> straight down, 🪃 Boomerang <i>curls</i> (hold A/D for the side). 🦎 Gecko sticks to anything and climbs walls.</td></tr>
       <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Walk to your disc (camera-relative) · <kbd>A</kbd>/<kbd>D</kbd> nudge the disc mid-flight</td></tr>
       <tr><td><kbd>Shift</kbd> · <kbd>Space</kbd></td><td>Sprint · jump (hold for a higher jump)</td></tr>
       <tr><td>Right-drag · wheel</td><td>Look around (walking, driving and aiming) · zoom</td></tr>
       <tr><td>Relief</td><td>Can't reach your disc? Take a penalty stroke and replay from your last lie</td></tr>
       <tr><td><kbd>C</kbd> · <kbd>M</kbd></td><td>First-person view · hide the map</td></tr>
-      <tr><td><kbd>R</kbd> · <kbd>V</kbd></td><td>Slap a nearby player (knocks them out) · dive / roll to dodge hits</td></tr>
+      <tr><td><kbd>R</kbd> · <kbd>V</kbd></td><td>Slap a nearby player, bystander or barrel · dive / roll to dodge hits</td></tr>
+      <tr><td><kbd>E</kbd> · <kbd>B</kbd></td><td>Hop in the golf cart (Space drifts, ramps launch) · hold for the emote wheel</td></tr>
       <tr><td><kbd>F</kbd> · <kbd>G</kbd></td><td>Use your item · switch item (carry up to 3 from the purple <b>?</b> bags)</td></tr>
     </table>
     <div class="help-tip" style="font-size:11px;opacity:.8">Characters: Quaternius (CC0) · "Suit" by Quaternius and "Character Base" by madtrollstudio, both CC-BY 3.0 via poly.pizza.</div>
+    <div class="help-tip"><b>The course fights back:</b> 🍄 bounce pads spring you (and your disc) sky-high, 🌀 updraft fans carry discs upward, 🛢️ barrels explode and fling the disc on, and 🪿 geese honk, chase and steal. Sprint into a rock and you'll faceplant. In the 🦖 Dino Jungle the T-rex charges when it roars and red rings mark incoming lava bombs; the 🎈 Bouncy Castle makes everything (you included) bounce.</div>
     <div class="help-tip"><b>Battle mode</b> (multiplayer): everyone plays at once. Points for finishing order, birdies, long makes, speedruns and knockouts. Once someone holes out the rest have 40 s to finish!</div>
     <div class="help-tip">From hole 3 on, each hole adds a twist — rising water, crumbling platforms, critters that steal your disc, failing lights… The hole banner tells you which. The dotted arc previews your throw and the ring shows where it lands. The green band on the power meter is the disc's sweet spot. Clip the band or rim and the basket spits the disc back out.</div>
   </div>
@@ -824,32 +1025,46 @@ body.bt-done #relief-btn{display:none;}
     };
     window._loadedScripts = [];
   </script>
-  <script src="graphics.js?v=26102502"></script>
-  <script src="config.js?v=26102502"></script>
-  <script src="rng.js?v=26102502"></script>
-  <script src="audio.js?v=26102502"></script>
-  <script src="weather.js?v=26102502"></script>
-  <script src="particles.js?v=26102502"></script>
-  <script src="powerups.js?v=26102502"></script>
-  <script src="battle.js?v=26102502"></script>
-  <script src="terrain.js?v=26102502"></script>
-  <script src="obstacles.js?v=26102502"></script>
-  <script src="physics.js?v=26102502"></script>
-  <script src="cosmetics.js?v=26102502"></script>
-  <script src="course.js?v=26102502"></script>
-  <script src="levels.js?v=26102502"></script>
-  <script src="levels2.js?v=26102502"></script>
-  <script src="levels3.js?v=26102502"></script>
-  <script src="entities.js?v=26102502"></script>
-  <script src="anim.js?v=26102502"></script>
-  <script src="player.js?v=26102502"></script>
-  <script src="vehicle.js?v=26102502"></script>
-  <script src="world.js?v=26102502"></script>
-  <script src="life.js?v=26102502"></script>
-  <script src="ui.js?v=26102502"></script>
-  <script src="multiplayer.js?v=26102502"></script>
-  <script src="game.js?v=26102502"></script>
-  <script src="profile.js?v=26102502"></script>
+  <script src="graphics.js?v=26102803"></script>
+  <script src="config.js?v=26102803"></script>
+  <script src="settings.js?v=26102803"></script>
+  <script src="rng.js?v=26102803"></script>
+  <script src="audio.js?v=26102803"></script>
+  <script src="weather.js?v=26102803"></script>
+  <script src="particles.js?v=26102803"></script>
+  <script src="powerups.js?v=26102803"></script>
+  <script src="arsenal.js?v=26102803"></script>
+  <script src="battle.js?v=26102803"></script>
+  <script src="terrain.js?v=26102803"></script>
+  <script src="obstacles.js?v=26102803"></script>
+  <script src="physics.js?v=26102803"></script>
+  <script src="feel.js?v=26102803"></script>
+  <script src="cine.js?v=26102803"></script>
+  <script src="cosmetics.js?v=26102803"></script>
+  <script src="course.js?v=26102803"></script>
+  <script src="levels.js?v=26102803"></script>
+  <script src="levels2.js?v=26102803"></script>
+  <script src="levels3.js?v=26102803"></script>
+  <script src="entities.js?v=26102803"></script>
+  <script src="levels4.js?v=26102803"></script>
+  <script src="levels5.js?v=26102803"></script>
+  <script src="anim.js?v=26102803"></script>
+  <script src="toon.js?v=26102803"></script>
+  <script src="ragdoll.js?v=26102803"></script>
+  <script src="player.js?v=26102803"></script>
+  <script src="vehicle.js?v=26102803"></script>
+  <script src="world.js?v=26102803"></script>
+  <script src="life.js?v=26102803"></script>
+  <script src="gadgets.js?v=26102803"></script>
+  <script src="ui.js?v=26102803"></script>
+  <script src="input.js?v=26102803"></script>
+  <script src="multiplayer.js?v=26102803"></script>
+  <script src="game.js?v=26102803"></script>
+  <script src="profile.js?v=26102803"></script>
+  <script src="emote.js?v=26102803"></script>
+  <script src="juice.js?v=26102803"></script>
+  <script src="podium.js?v=26102803"></script>
+  <script src="menu3d.js?v=26102803"></script>
 
 
   <script>
@@ -889,6 +1104,7 @@ body.bt-done #relief-btn{display:none;}
       <label class="vol"><span>Music</span><input type="range" id="vol-music" min="0" max="100" oninput="AudioEngine.setVolume('music', this.value / 100)"></label>
       <label class="vol"><span>Ambience</span><input type="range" id="vol-ambience" min="0" max="100" oninput="AudioEngine.setVolume('ambience', this.value / 100)"></label>
       <label class="vol"><span>Effects</span><input type="range" id="vol-sfx" min="0" max="100" oninput="AudioEngine.setVolume('sfx', this.value / 100)"></label>
+      <label class="vol"><span>Interface</span><input type="range" id="vol-ui" min="0" max="100" oninput="AudioEngine.setVolume('ui', this.value / 100)"></label>
       <button id="vol-mute" class="btn block" style="margin-top:14px" onclick="AudioEngine.toggleMute()">Mute all</button>
       <div class="help-tip" style="text-align:center">Every course has its own music style — and a new tune on each hole.</div>
     </div>

@@ -89,8 +89,10 @@ function spawnExplosion(pos) {
     var m = _pMesh("sph", 0xff8a20, 0.25 + Math.random() * 0.3, true);
     _pAdd(m, pos, new THREE.Vector3((Math.random() - 0.5) * 9, Math.random() * 6, (Math.random() - 0.5) * 9), 0.7, { grav: 2, drag: 2.5, shrink: true });
   }
-  if (typeof _screenShake !== "undefined") { _screenShake = 0.5; _screenShakeT = 0.5; }
-  AudioEngine.sfx("boom");
+  // shake and loudness fall off with distance from the camera
+  var _cd = typeof camera !== "undefined" ? camera.position.distanceTo(pos) : 0;
+  if (typeof _screenShake !== "undefined") { _screenShake = Math.max(_screenShake, 0.6 * Math.max(0.15, 1 - _cd / 45)); _screenShakeT = 0.5; }
+  AudioEngine.sfx("boom", 0.8, pos);
 }
 
 // ── Vilov explosion: push nearby obstacles outward ──
@@ -130,9 +132,12 @@ function initTrail() {
   for (var j = 0; j < TRAIL_LENGTH - 1; j++) { var A = j * 2; idx.push(A, A + 1, A + 2, A + 1, A + 3, A + 2); }
   trailGeometry.setIndex(idx);
   const trailMat = new THREE.ShaderMaterial({
-    uniforms: { color: { value: new THREE.Color(0xffffff) }, opacity: { value: 0.75 } },
+    uniforms: { color: { value: new THREE.Color(0xffffff) }, opacity: { value: 0.75 }, rainbow: { value: 0 }, uT: GFX.time },
     vertexShader: "attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-    fragmentShader: "uniform vec3 color; uniform float opacity; varying float vA; void main(){ gl_FragColor = vec4(color, vA * opacity); gl_FragColor = linearToOutputTexel(gl_FragColor); }",
+    // rainbow skins: the hue runs along the ribbon and scrolls
+    fragmentShader: "uniform vec3 color; uniform float opacity; uniform float rainbow; uniform float uT; varying float vA;" +
+      "vec3 hue(float h){ return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }" +
+      "void main(){ vec3 c = mix(color, hue(fract(vA * 1.4 - uT * 0.5)) * 1.1, rainbow); gl_FragColor = vec4(c, vA * opacity * (1.0 + rainbow * 0.3)); gl_FragColor = linearToOutputTexel(gl_FragColor); }",
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
   trailMesh = new THREE.Mesh(trailGeometry, trailMat);
@@ -152,8 +157,8 @@ function updateTrail(pos, isFlying) {
   trailMesh.visible = true;
   // trail colour follows the disc skin
   var _tc = (typeof discMesh !== "undefined" && discMesh && discMesh.userData.trail) || 0xffffff;
-  if (_tc === "rainbow") trailMesh.material.uniforms.color.value.setHSL((performance.now() * 0.0004) % 1, 1, 0.6);
-  else trailMesh.material.uniforms.color.value.setHex(_tc);
+  trailMesh.material.uniforms.rainbow.value = _tc === "rainbow" ? 1 : 0;
+  if (_tc !== "rainbow") trailMesh.material.uniforms.color.value.setHex(_tc);
   if (trailPositions.length === 0 || trailPositions[0].distanceToSquared(pos) > 0.0025) {
     trailPositions.unshift(pos.clone());
     if (trailPositions.length > TRAIL_LENGTH) trailPositions.pop();
@@ -305,6 +310,7 @@ function handleImpact(type, pos, velocity) {
   var intensity = Math.max(0.05, Math.min(1.0, speed / 20));
 
   ImpactAudio.play(type, intensity);
+  if (typeof CINE !== "undefined") CINE.onImpact(type, pos, velocity);
 
   switch (type) {
     case "terrain":
@@ -321,6 +327,7 @@ function handleImpact(type, pos, velocity) {
       break;
     case "water":
       spawnWaterSplash(pos, intensity);
+      if (typeof GAD !== "undefined") { var _wl = HOLES[holeIdx] && HOLES[holeIdx].course ? HOLES[holeIdx].course.hazardAt(pos.x, pos.z).level : pos.y; GAD.ring(new THREE.Vector3(pos.x, _wl - 0.05, pos.z), 0xcff4ff, 2.5 + intensity * 3, 0.9); }
       break;
     case "metal":
       spawnSparks(pos, intensity);

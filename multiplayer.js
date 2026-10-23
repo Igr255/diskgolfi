@@ -306,6 +306,12 @@ function handleMsg(msg) {
   const from = msg.from !== undefined ? msg.from : 1;
   if (typeof BT !== "undefined" && BT.handle(msg)) return;
   if (msg.t === "it") { if (typeof PU !== "undefined" && msg.o !== myIdx) PU.onNet(msg); return; }
+  if (msg.t === "emote") { if (msg.i === myIdx) return; if (msg.pod && typeof POD !== "undefined" && POD.on) POD.onEmote(msg); else if (typeof EMOTE !== "undefined") EMOTE.onNet(msg); return; }
+  if (msg.t === "gad") { if (typeof GAD !== "undefined" && msg.from !== myIdx) GAD.onNet(msg); return; }
+  if (msg.t === "abil") { if (typeof ARS !== "undefined" && msg.from !== myIdx) ARS.onNet(msg); return; }
+  if (msg.t === "rag") { if (typeof RAG !== "undefined" && msg.i !== myIdx) RAG.onNet(msg); return; }
+  if (msg.t === "lobby_ready") { window._ready = window._ready || {}; window._ready[msg.i] = msg.r; if (typeof _lobbyHud === "function") _lobbyHud(); if (myIdx === 0) QP.refresh(); return; }
+  if (msg.t === "sync_chk") { _desyncCheck(msg); return; }
   if (msg.t === "lobby_cfg") { BT.mode = msg.mode || BT.mode; BT.items = msg.items || BT.items; if (typeof _lobbyHud === "function") _lobbyHud(); return; }
 
   if (msg.t === "start") {
@@ -380,10 +386,14 @@ function handleMsg(msg) {
       }
       rp.discPos.set(msg.px, msg.py, msg.pz);
       rp.discVel.set(msg.vx, msg.vy, msg.vz);
+      if (rp.discMesh) rp.discMesh.rotation.set(0, 0, 0);   // out of their hand: fly flat
+      AudioEngine.sfx("throw", 0.5, rp.discPos);
       rp.bankArr = [msg.hz || 0];
       rp.spin    = Math.hypot(msg.vx, msg.vz) * 3;
       rp.flying  = true;
       rp.fire    = !!msg.fire;
+      rp.mod     = msg.mod || null;
+      rp.ars     = typeof ARS !== "undefined" ? ARS.stateFor(msg.disc, (msg.hz || 0) > 0.01 ? 1 : -1) : null;
     }
 
   } else if (msg.t === "land") {
@@ -492,15 +502,8 @@ function handleMsg(msg) {
 
   } else if (msg.t === "game_over") {
     BT._tallyHide();
-    if (BT.on()) { var _w = BT.winner(); showMsg("🏆 " + BT.name(_w) + " WINS!", BT.pts[_w] + " points · " + (_w === myIdx ? "you're the top golfer!" : "you scored " + BT.pts[myIdx]), null); }
-    else showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
     if (typeof PF !== "undefined") PF.matchEnd(msg.totals);
-    setTimeout(function() {
-      hideMsg();
-      document.getElementById("menu").style.display = "flex";
-      document.getElementById("ui").style.display   = "none";
-      phase = "MENU";
-    }, 4000);
+    POD.showMatch(msg.totals);   // the victory stage (back to the menu from its board)
 
   } else if (msg.t === "throw_skin") {
     // Remote player threw — update their skin for this throw
@@ -512,6 +515,22 @@ function handleMsg(msg) {
     window._remoteCos = window._remoteCos || {}; window._remoteCos[msg.from] = msg.cos;
     var _crp = remotePlayers[msg.from];
     if (_crp && _crp.avatarMesh && _crp.avatarMesh.userData.glbLoaded) COS.dressAvatar(_crp.avatarMesh, msg.cos);
+    if (_lobby3D) _update3DLobbyPlayers();
+
+  } else if (msg.t === "look") {   // someone picked a new character / hat / finish (lobby or mid-match)
+    if (msg.from === myIdx) return;
+    window._remoteSkins = window._remoteSkins || {}; window._remoteSkins[msg.from] = msg.skin || "default";
+    window._remoteCos = window._remoteCos || {}; window._remoteCos[msg.from] = msg.cos || null;
+    if (_lobby3D) _update3DLobbyPlayers();
+    else {
+      var _lrp = remotePlayers[msg.from];
+      if (_lrp && _lrp.avatarMesh) {
+        var _lp = _lrp.avatarMesh.position.clone(), _ly = _lrp.avatarMesh.rotation.y;
+        scene.remove(_lrp.avatarMesh); _lobbyStopMixers(_lrp.avatarMesh);
+        _lrp.avatarMesh = buildPlayerAvatar(msg.from, PLAYER_COLORS[msg.from % PLAYER_COLORS.length]);
+        _lrp.avatarMesh.position.copy(_lp); _lrp.avatarMesh.rotation.y = _ly; scene.add(_lrp.avatarMesh);
+      }
+    }
 
   } else if (msg.t === "skin_equip") {
     if (typeof equippedSkins !== "undefined" && msg.from !== undefined) {
@@ -606,15 +625,8 @@ function checkAllDone() {
         var _tot = BT.on() ? BT.pts.map(function(p) { return -p; }) : mpTotals;
         sendToAll({ t: "game_over", totals: _tot, names: playerNames });
         BT._tallyHide();
-        if (BT.on()) { var _w = BT.winner(); showMsg("🏆 " + BT.name(_w) + " WINS!", BT.pts[_w] + " points · " + (_w === myIdx ? "you're the top golfer!" : "you scored " + BT.pts[myIdx]), null); }
-        else showMsg("GAME OVER!", "All " + HOLE_COUNT + " holes complete!", null);
         if (typeof PF !== "undefined") PF.matchEnd(_tot);
-        setTimeout(() => {
-          hideMsg();
-          document.getElementById("menu").style.display = "flex";
-          document.getElementById("ui").style.display   = "none";
-          phase = "MENU";
-        }, 4000);
+        POD.showMatch(_tot);
         return;
       }
       BT._tallyHide();
@@ -636,6 +648,7 @@ function checkAllDone() {
 // ── HOST GAME ────────────────────────────────────────────────────────────────
 // ── LEAVE / RESET MULTIPLAYER ───────────────────────────────────────
 function leaveLobby() {
+  QP.setPublic(false); window._ready = {};
   conns.forEach(function(c) { if (c && c.open) { try { c.send(JSON.stringify({ t: "bye" })); } catch (e) {} } });
   window._leftPlayers = {};
   _relayStop();
@@ -741,6 +754,16 @@ function _update3DLobbyPlayers() {
   if (L.meLabel) L.meLabel.textContent = (playerNames[myIdx] || "You") + (myIdx === 0 ? " 👑" : "") + " · you";
   _lobbyHud();
 }
+// My look changed (character, hat, finish): show it in the lobby and tell everyone connected —
+// in the lobby too (mpMode only turns on when the match starts), so the host's start message is right
+function _netLive() { return conns.some(function(c) { return c && c.open; }); }
+function _sendLook() { if (_netLive()) sendToAll({ t: "look", from: myIdx, skin: equippedPlayerSkin, cos: COS.equipped() }); }
+function _lobbyRefreshMe() {
+  var L = _lobby3D; if (!L || !L.me) return;
+  _lobbyStopMixers(L.me); L.group.remove(L.me); L.me = null; L.meAnim = null;
+  if (L.meLabel) { L.meLabel.remove(); L.meLabel = null; }
+  _update3DLobbyPlayers();
+}
 function _lobbyDropAvatar(i) {
   var L = _lobby3D, av = L && L.avatars[i]; if (!av) return;
   if (av.mesh) { L.group.remove(av.mesh); _lobbyStopMixers(av.mesh); }
@@ -767,8 +790,9 @@ function _lobbyHud() {
   for (var i = 0; i < playerCount; i++) if (!(window._leftPlayers && window._leftPlayers[i])) present.push(i);
   var list = present.map(function(i) {
     var sk = (typeof PLAYER_SKINS !== "undefined") ? PLAYER_SKINS.find(function(p) { return p.id === (i === myIdx ? equippedPlayerSkin : ((window._remoteSkins || {})[i] || "default")); }) : null;
+    var rdy = i === 0 || (window._ready || {})[i];
     return "<div class='lb-p'><span class='dot' style='background:#" + PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, "0") + "'></span><b>" +
-      (playerNames[i] || ("Player " + (i + 1))).replace(/</g, "&lt;") + "</b><span>" + (sk ? sk.icon + " " + sk.name : "") + (i === 0 ? " · host" : "") + (i === myIdx ? " · you" : "") + "</span></div>";
+      (playerNames[i] || ("Player " + (i + 1))).replace(/</g, "&lt;") + "</b><span>" + (sk ? sk.icon + " " + sk.name : "") + (i === 0 ? " · host" : "") + (i === myIdx ? " · you" : "") + "</span><em class='rdy" + (rdy ? " on" : "") + "'>" + (rdy ? "✓ " + t("ready") : "…") + "</em></div>";
   }).join("");
   var hud = document.createElement("div"); hud.id = "lobby3d-hud";
   hud.innerHTML = "<div class='sheet'>" +
@@ -781,14 +805,24 @@ function _lobbyHud() {
       [["off", "Off"], ["normal", "Normal"], ["chaos", "🔥 Chaos"]].map(function(o) { return "<button" + (BT.items === o[0] ? " class='on'" : "") + (isHost ? " onclick='_lobbySet(\"items\",\"" + o[0] + "\")'" : " disabled") + ">" + o[1] + "</button>"; }).join("") + "</div>" +
     "<div class='lobby-meta'><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Space</kbd> jump · <kbd>R</kbd> bonk</div>" +
     "<div class='lobby-actions'>" +
-    (isHost && present.length >= 2 ? "<button class='btn primary big block' onclick='hostStartGame()'>Start game</button>"
-      : "<div class='status'>" + (isHost ? "Share the code — waiting for players…" : "Waiting for the host to start…") + "</div>") +
+    (function() {
+      var R = window._ready || {}, nReady = present.filter(function(i) { return i === 0 || R[i]; }).length, all = nReady === present.length;
+      if (isHost) return (present.length >= 2 ? "<button class='btn " + (all ? "primary" : "") + " big block' onclick='hostStartGame()'>Start game · " + nReady + "/" + present.length + " " + t("ready").toLowerCase() + "</button>" : "<div class='status'>Share the code — waiting for players…</div>") +
+        "<label class='s-row'><span>🌍 " + t("public_lobby") + "</span><input type='checkbox' " + (QP.pub ? "checked" : "") + " onchange='QP.setPublic(this.checked)'></label>";
+      var me = !!R[myIdx];
+      return "<button class='btn " + (me ? "" : "primary") + " big block' onclick='_toggleReady()'>" + (me ? "✓ " + t("ready") + " — tap to cancel" : t("ready") + "?") + "</button><div class='status'>" + (all ? "Everyone's ready — waiting for the host…" : "Waiting for the host to start…") + "</div>";
+    })() +
     "<button class='btn block' onclick='openProfile(\"character\")'>Change look</button>" +
     "<button class='btn block ghost' onclick='leaveLobby()'>Leave</button></div></div>";
   L.overlay.appendChild(hud);
   if (typeof _lobbyMobileControls === "function") _lobbyMobileControls();
 }
 
+function _toggleReady() {
+  window._ready = window._ready || {}; window._ready[myIdx] = !window._ready[myIdx];
+  sendToAll({ t: "lobby_ready", i: myIdx, r: window._ready[myIdx] });
+  _lobbyHud();
+}
 function _lobbySet(k, v) {
   BT[k] = v;
   if (myIdx === 0) sendToAll({ t: "lobby_cfg", mode: BT.mode, items: BT.items });
@@ -959,6 +993,7 @@ function _hostIncoming(c) {
 
 function hostStartGame() {
   AudioEngine.init();
+  QP.setPublic(false);
   _SP_FORCED_THEME = null;
   hostGameStarted = true;
   mpMode          = true;
@@ -1072,5 +1107,87 @@ function _joinNet(code) {
       c.on("close", function() { if (!everOpen && !fellBack) fallback(); });
       setTimeout(fallback, 7000);   // direct link still not up → don't keep the player waiting
     });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ── PUBLIC LOBBIES & QUICK PLAY ─────────────────────────────────────────
+// A host can list the lobby publicly: a retained message on the relay
+// (dgolf/v1/open/<code>) refreshed every 15 s and cleared when the game starts.
+// Quick play reads the list and joins the fullest open lobby.
+// ══════════════════════════════════════════════════════════════════════
+var QP = { pub: false, cl: [], timer: null, TOPIC: "dgolf/v1/open/" };
+QP._connect = function(cb) {
+  if (QP.cl.length) { cb(QP.cl); return; }
+  _loadMqtt(function(ok) {
+    if (!ok) { cb([]); return; }
+    var left = RELAY_BROKERS.length, out = [];
+    RELAY_BROKERS.forEach(function(url) {
+      var c, done = false; try { c = mqtt.connect(url, { connectTimeout: 7000, reconnectPeriod: 0, clientId: "dgqp_" + Math.random().toString(36).slice(2, 9) }); } catch (e) { if (--left === 0) cb(out); return; }
+      var fin = function(okc) { if (done) return; done = true; if (okc) out.push(c); else { try { c.end(true); } catch (e) {} } if (--left === 0) { QP.cl = out; cb(out); } };
+      c.once("connect", function() { fin(true); }); c.once("error", function() { fin(false); }); setTimeout(function() { fin(false); }, 7500);
+    });
+  });
+};
+QP._code = function() { return ((typeof _hostRawCode !== "undefined" && _hostRawCode) || "").toUpperCase(); };
+QP.refresh = function() {
+  if (!QP.pub || myIdx !== 0 || !QP._code()) return;
+  var present = 0; for (var i = 0; i < playerCount; i++) if (!(window._leftPlayers && window._leftPlayers[i])) present++;
+  var info = JSON.stringify({ c: QP._code(), n: (playerNames[0] || "Host").slice(0, 16), p: present, m: MAX_PLAYERS, mode: BT.mode, t: Date.now() });
+  QP.cl.forEach(function(c) { try { c.publish(QP.TOPIC + QP._code(), info, { retain: true, qos: 0 }); } catch (e) {} });
+};
+QP.setPublic = function(on) {
+  var was = QP.pub; QP.pub = !!on;
+  if (QP.pub) { QP._connect(function() { QP.refresh(); }); clearInterval(QP.timer); QP.timer = setInterval(QP.refresh, 15000); }
+  else {
+    clearInterval(QP.timer);
+    if (was && QP._code()) QP.cl.forEach(function(c) { try { c.publish(QP.TOPIC + QP._code(), "", { retain: true }); } catch (e) {} });
+  }
+  if (typeof _lobbyHud === "function") _lobbyHud();
+};
+QP.find = function(cb) {
+  QP._connect(function(cls) {
+    if (!cls.length) { cb([]); return; }
+    var found = {};
+    cls.forEach(function(c) {
+      c.on("message", function(tp, buf) { var s = buf.toString(); if (!s) return; try { var m = JSON.parse(s); if (m && m.c && Date.now() - m.t < 60000 && m.p < m.m) found[m.c] = m; } catch (e) {} });
+      c.subscribe(QP.TOPIC + "+");
+    });
+    setTimeout(function() { cls.forEach(function(c) { try { c.unsubscribe(QP.TOPIC + "+"); c.removeAllListeners("message"); } catch (e) {} }); cb(Object.keys(found).map(function(k) { return found[k]; })); }, 2500);
+  });
+};
+QP.quickPlay = function() {
+  var st = document.getElementById("join-status"), list = document.getElementById("qp-list");
+  if (st) st.textContent = "Looking for open lobbies…";
+  LOG.ev("quick_play");
+  QP.find(function(L) {
+    if (!L.length) { if (st) st.textContent = t("no_lobbies"); if (list) list.innerHTML = ""; return; }
+    L.sort(function(a, b) { return b.p - a.p; });
+    if (list) list.innerHTML = L.slice(0, 5).map(function(m) { return "<button class='btn ghost block' onclick=\"document.getElementById('mp-input').value='" + m.c + "';joinGame()\">" + m.n.replace(/</g, "&lt;") + " · " + m.p + "/" + m.m + " · " + (m.mode === "classic" ? "⛳" : "⚔️") + "</button>"; }).join("");
+    document.getElementById("mp-input").value = L[0].c;
+    if (st) st.textContent = "Joining " + L[0].n + "'s lobby…";
+    joinGame();
+  });
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// ── DESYNC DETECTION ────────────────────────────────────────────────────
+// Every 6 s the host sends a fingerprint of the match state that must agree
+// on every screen (hole, points, finish places, knockouts). Guests compare and
+// log a desync to the error log (Settings → Diagnostics) if theirs differs.
+// ══════════════════════════════════════════════════════════════════════
+function _syncPrint() {
+  return [holeIdx, (BT.pts || []).slice(0, playerCount).join(","), (BT.place || []).slice(0, playerCount).join(","), (BT.kos || []).slice(0, playerCount).join(","), matchSeed].join("|");
+}
+setInterval(function() {
+  if (typeof mpMode === "undefined" || !mpMode || myIdx !== 0 || typeof phase === "undefined" || phase === "MENU") return;
+  sendToAll({ t: "sync_chk", h: holeIdx, fp: _syncPrint(), at: Date.now() });
+}, 6000);
+function _desyncCheck(m) {
+  if (myIdx === 0 || m.h !== holeIdx) return;
+  var mine = _syncPrint();
+  if (mine !== m.fp) {
+    // give in-flight messages a moment, then compare again before calling it a desync
+    setTimeout(function() { if (holeIdx === m.h && _syncPrint() !== m.fp && _syncPrint() === mine) { LOG.err("desync", "mp", { host: m.fp, mine: mine }); console.warn("DiskGolfi: desync vs host", m.fp, mine); } }, 1500);
   }
 }
